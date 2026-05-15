@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68.0", "setuptools-scm"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dfrobot_as3935"
+version = "2.0.0"
+description = "DFRobot AS3935 Lightning Sensor driver for Raspberry Pi (Python 3.11+, smbus2, gpiozero)"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [
+    { name = "DFRobot" },
+]
+readme = "README.md"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: System :: Hardware :: Hardware Drivers",
+]
+
+dependencies = [
+    "smbus2>=0.4.0",
+    "gpiozero>=2.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0",
+    "hypothesis>=6.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+dfrobot_as3935 = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "property: Property-based tests (Hypothesis)",
+    "unit: Example-based unit tests",
+    "smoke: Configuration and structure checks",
+]
