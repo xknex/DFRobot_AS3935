@@ -18,10 +18,19 @@ import pytest
 # This allows tests to run on Windows/macOS where fcntl is unavailable.
 smbus2_mock = MagicMock()
 gpiozero_mock = MagicMock()
+mariadb_mock = MagicMock()
+
+
+class _MariaDBError(Exception):
+    """Fake mariadb.Error for testing without the real mariadb C connector."""
+
+
+mariadb_mock.Error = _MariaDBError
 
 sys.modules.setdefault("smbus2", smbus2_mock)
 sys.modules.setdefault("gpiozero", gpiozero_mock)
 sys.modules.setdefault("fcntl", MagicMock())
+sys.modules.setdefault("mariadb", mariadb_mock)
 
 
 @pytest.fixture

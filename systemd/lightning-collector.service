@@ -1,0 +1,17 @@
+[Unit]
+Description=Lightning Data Collector Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=python -m lightning_collector
+Restart=on-failure
+RestartSec=5
+EnvironmentFile=/etc/lightning/environment
+WorkingDirectory=/opt/lightning
+User=lightning
+Group=lightning
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,17 @@
+[Unit]
+Description=Lightning REST API Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=python -m lightning_api
+Restart=on-failure
+RestartSec=5
+EnvironmentFile=/etc/lightning/environment
+WorkingDirectory=/opt/lightning
+User=lightning
+Group=lightning
+
+[Install]
+WantedBy=multi-user.target

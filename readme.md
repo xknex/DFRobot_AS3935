@@ -163,7 +163,7 @@ pip install -e ".[test]"
 python -m pytest tests/ -v
 ```
 
-The test suite (295 tests) runs without hardware using mocked I2C and GPIO. Includes property-based tests via Hypothesis.
+The test suite (364 tests) runs without hardware using mocked I2C and GPIO. Includes property-based tests via Hypothesis covering the sensor driver, collector components, configuration, and REST API.
 
 ## Compatibility
 
@@ -196,10 +196,163 @@ This is a complete rewrite of the original DFRobot library. Key changes:
 - **Bug fixes**: Corrected LCO bit (0x80), clear_statistics sequence, energy calculation
 - **Type hints**: Full annotations for IDE support
 - **Logging**: Structured logging via Python `logging` module (no print statements)
-- **Testing**: 295 tests including property-based tests (Hypothesis)
+- **Testing**: 364 tests including property-based tests (Hypothesis)
 - **Pin numbering**: BCM (gpiozero) instead of BOARD (RPi.GPIO)
 
 The legacy code remains available in `python/raspberrypi/` for reference.
+
+## Lightning Data Pipeline
+
+The Lightning Data Pipeline extends this sensor driver with two independent services for continuous event collection and data access, designed for Raspberry Pi Zero 2W.
+
+### Services
+
+| Service | Description | Entry Point |
+|---------|-------------|-------------|
+| **Collector** | Long-running daemon that detects AS3935 interrupt events, writes each event to a local CSV file and a remote MariaDB database | `python -m lightning_collector` |
+| **REST API** | FastAPI application serving lightning event data from MariaDB over HTTP for browser-based dashboards | `python -m lightning_api` |
+
+Both services are managed by systemd with automatic restart on failure.
+
+### Configuration
+
+Configuration is loaded from environment variables (prefix `LIGHTNING_`) with an optional fallback to a TOML file (`lightning.toml`). Environment variables always take priority over TOML values.
+
+#### Environment Variables
+
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `LIGHTNING_DB_HOST` | MariaDB host address | — | Yes |
+| `LIGHTNING_DB_PORT` | MariaDB port (1–65535) | — | Yes |
+| `LIGHTNING_DB_USER` | MariaDB username | — | Yes |
+| `LIGHTNING_DB_PASSWORD` | MariaDB password | — | Yes |
+| `LIGHTNING_DB_NAME` | MariaDB database name | — | Yes |
+| `LIGHTNING_CSV_FILE_PATH` | Path to local CSV file | `/var/lib/lightning/events.csv` | No |
+| `LIGHTNING_SENSOR_I2C_ADDRESS` | I2C address (0x01, 0x02, 0x03) | `0x03` | No |
+| `LIGHTNING_SENSOR_I2C_BUS` | I2C bus number | `1` | No |
+| `LIGHTNING_SENSOR_IRQ_PIN` | BCM GPIO pin for IRQ | `4` | No |
+| `LIGHTNING_BUFFER_MAX_SIZE` | Max write buffer size | `10000` | No |
+| `LIGHTNING_API_HOST` | REST API bind address | `0.0.0.0` | No |
+| `LIGHTNING_API_PORT` | REST API port (1–65535) | `8000` | No |
+| `LIGHTNING_CORS_ORIGINS` | Allowed CORS origins (JSON list) | `["*"]` | No |
+| `LIGHTNING_DB_POOL_SIZE` | API connection pool size | `5` | No |
+
+#### Example `lightning.toml`
+
+```toml
+# Lightning Data Pipeline Configuration
+
+db_host = "192.168.1.100"
+db_port = 3306
+db_user = "lightning"
+db_password = "secret"
+db_name = "lightning_events"
+
+# Collector settings
+csv_file_path = "/var/lib/lightning/events.csv"
+sensor_i2c_address = 3
+sensor_i2c_bus = 1
+sensor_irq_pin = 4
+buffer_max_size = 10000
+
+# API settings
+api_host = "0.0.0.0"
+api_port = 8000
+cors_origins = ["*"]
+db_pool_size = 5
+```
+
+Place the file in the working directory or set values via environment variables. The file should have restricted permissions (`chmod 0600 lightning.toml`) since it contains credentials.
+
+### Systemd Setup
+
+Unit files are provided in the `systemd/` directory.
+
+```bash
+# Create service user
+sudo useradd -r -s /bin/false lightning
+
+# Create directories
+sudo mkdir -p /opt/lightning /var/lib/lightning /etc/lightning
+sudo chown lightning:lightning /var/lib/lightning
+
+# Install the package
+sudo cp -r . /opt/lightning
+cd /opt/lightning
+sudo -u lightning python3 -m venv .venv
+sudo -u lightning .venv/bin/pip install .
+
+# Create environment file with credentials
+sudo tee /etc/lightning/environment << 'EOF'
+LIGHTNING_DB_HOST=192.168.1.100
+LIGHTNING_DB_PORT=3306
+LIGHTNING_DB_USER=lightning
+LIGHTNING_DB_PASSWORD=secret
+LIGHTNING_DB_NAME=lightning_events
+EOF
+sudo chmod 0600 /etc/lightning/environment
+
+# Install and enable services
+sudo cp systemd/lightning-collector.service /etc/systemd/system/
+sudo cp systemd/lightning-api.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now lightning-collector
+sudo systemctl enable --now lightning-api
+```
+
+Check service status:
+
+```bash
+sudo systemctl status lightning-collector
+sudo systemctl status lightning-api
+sudo journalctl -u lightning-collector -f
+sudo journalctl -u lightning-api -f
+```
+
+### API Endpoints
+
+The REST API runs on port 8000 by default.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/events` | Paginated list of events with filtering |
+| GET | `/events/latest` | Most recent event |
+| GET | `/events/stats` | Summary statistics |
+| GET | `/health` | Service health check |
+
+#### GET /events
+
+Query parameters:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `page` | int | 1 | Page number |
+| `page_size` | int | 50 | Items per page (max 200) |
+| `start_date` | ISO 8601 | — | Filter events after this date |
+| `end_date` | ISO 8601 | — | Filter events before this date |
+| `event_type` | string | — | Filter by type: `lightning`, `disturber`, or `noise` |
+
+Response includes `data` (list of events) and `pagination` metadata (`total_count`, `page`, `page_size`, `total_pages`). Results are ordered by timestamp descending.
+
+#### GET /events/latest
+
+Returns the most recent event record. Returns HTTP 404 if no events exist.
+
+#### GET /events/stats
+
+Returns summary statistics:
+- `count_by_type` — event counts per type (lightning, disturber, noise)
+- `count_last_24h` — events in the last 24 hours
+- `count_last_7d` — events in the last 7 days
+- `latest_event_timestamp` — timestamp of the most recent event (null if none)
+
+#### GET /health
+
+Returns service status, database connectivity, and uptime. Returns HTTP 200 with `"healthy"` when the database is connected, or HTTP 503 with `"degraded"` when the database is unavailable.
+
+### Write Buffer (Network Resilience)
+
+The Collector Service uses an in-memory write buffer (`collections.deque`) to handle transient network failures gracefully. When the MariaDB connection is unavailable, events are buffered locally (up to 10,000 records) and flushed in chronological order once the connection is restored. The collector attempts reconnection every 10 seconds. If the buffer reaches capacity, the oldest record is discarded to make room for new events. CSV writes always happen first, ensuring a reliable local backup regardless of network state.
 
 ## License
 
