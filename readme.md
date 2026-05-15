@@ -22,6 +22,7 @@ The AS3935 Lightning Sensor detects lightning and estimates the distance and int
 - Python 3.11+
 - Raspberry Pi OS Bookworm (or later)
 - I2C enabled (`sudo raspi-config` → Interface Options → I2C)
+- For the Lightning Data Pipeline: `libmariadb-dev` and `python3-dev` (`sudo apt install libmariadb-dev python3-dev`)
 
 ## Installation
 
@@ -264,11 +265,24 @@ db_pool_size = 5
 
 Place the file in the working directory or set values via environment variables. The file should have restricted permissions (`chmod 0600 lightning.toml`) since it contains credentials.
 
+### System Dependencies
+
+The `mariadb` Python package is a C extension that requires system libraries to compile:
+
+```bash
+sudo apt install libmariadb-dev python3-dev
+```
+
+> **Note:** If you're using a Python version not provided by the system default (e.g. Python 3.13 from a PPA), install the matching dev package instead: `sudo apt install python3.13-dev`
+
 ### Systemd Setup
 
 Unit files are provided in the `systemd/` directory.
 
 ```bash
+# Install system dependencies
+sudo apt install libmariadb-dev python3-dev
+
 # Create service user
 sudo useradd -r -s /bin/false lightning
 
