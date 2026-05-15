@@ -6,3 +6,5 @@ build/
 .eggs/
 *.egg
 .hypothesis/
+.kiro/
+.pytest_cache/
