@@ -25,16 +25,28 @@ The AS3935 Lightning Sensor detects lightning and estimates the distance and int
 
 ## Installation
 
+Raspberry Pi OS Bookworm uses an externally-managed Python environment (PEP 668), so you need a virtual environment:
+
 ```bash
 git clone https://github.com/DFRobot/DFRobot_AS3935.git
 cd DFRobot_AS3935
+python3 -m venv .venv
+source .venv/bin/activate
 pip install .
 ```
 
 For development (with test dependencies):
 
 ```bash
+source .venv/bin/activate
 pip install -e ".[test]"
+```
+
+Activate the venv before running scripts:
+
+```bash
+source ~/DFRobot_AS3935/.venv/bin/activate
+python examples/lightning_detection.py
 ```
 
 ## Quick Start
