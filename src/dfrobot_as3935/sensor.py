@@ -121,7 +121,7 @@ class DFRobot_AS3935:
         # Phase 3: Acquire GPIO (cleanup bus on failure)
         try:
             self._irq_device: DigitalInputDevice = DigitalInputDevice(
-                irq_pin, pull_up=None
+                irq_pin, pull_up=False, active_state=True
             )
         except Exception:
             self._bus.close()
