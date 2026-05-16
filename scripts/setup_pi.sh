@@ -25,6 +25,25 @@
 #   -h, --help                            Show help
 set -euo pipefail
 
+# -------- Styling & progress helpers --------
+ENABLE_COLOR=1
+if [[ -n "${NO_COLOR:-}" || ! -t 1 ]] || ! command -v tput >/dev/null 2>&1; then ENABLE_COLOR=0; fi
+if [[ $ENABLE_COLOR -eq 1 ]]; then
+  BOLD="\e[1m"; DIM="\e[2m"; RESET="\e[0m";
+  RED="\e[31m"; GREEN="\e[32m"; YELLOW="\e[33m"; CYAN="\e[36m";
+  CHECK="${GREEN}✔${RESET}"; ARROW="${CYAN}➜${RESET}";
+else
+  BOLD=""; DIM=""; RESET=""; RED=""; GREEN=""; YELLOW=""; CYAN=""; CHECK="[OK]"; ARROW=">";
+fi
+
+STEP=0; TOTAL=0
+step() {
+  STEP=$((STEP+1))
+  printf "${BOLD}%s [%d/%d] %s${RESET}\n" "$ARROW" "$STEP" "$TOTAL" "$1"
+}
+warn() { printf "%b%s%b\n" "$YELLOW" "$1" "$RESET" >&2; }
+die()  { printf "%b%s%b\n" "$RED" "$1" "$RESET" >&2; exit 1; }
+
 PIN_FACTORY="pigpio"
 VENV_PATH="${HOME}/.venvs/DFRobot_AS3935"
 DO_APT=1
@@ -72,7 +91,13 @@ require_cmd() {
   command -v "$1" >/dev/null 2>&1 || { echo "Missing required command: $1" >&2; exit 1; }
 }
 
-echo "[1/6] Verifying prerequisites"
+# Compute total steps dynamically now that flags are parsed
+TOTAL=5
+[[ $RUN_TESTS -eq 1 ]] && TOTAL=$((TOTAL+1))
+[[ $RUN_HW -eq 1 ]] && TOTAL=$((TOTAL+1))
+[[ $INSTALL_SERVICES -eq 1 ]] && TOTAL=$((TOTAL+1))
+
+step "Verifying prerequisites"
 require_cmd python3
 require_cmd git
 if [[ $DO_APT -eq 1 ]]; then
@@ -105,22 +130,22 @@ enable_i2c_fallback() {
 
 if [[ $DO_I2C -eq 1 ]]; then
   if command -v raspi-config >/dev/null 2>&1; then
-    echo "[2/6] Enabling I2C via raspi-config (non-interactive)"
+    step "Enabling I2C via raspi-config (non-interactive)"
     sudo raspi-config nonint do_i2c 0 || echo "raspi-config I2C enable step returned non-zero; attempting fallback"
   else
-    echo "[2/6] raspi-config not found; attempting config.txt fallback"
+    step "raspi-config not found; attempting config.txt fallback"
     enable_i2c_fallback || true
   fi
 else
-  echo "[2/6] Skipping I2C enable per flag"
+  step "Skipping I2C enable per flag"
 fi
 
 if [[ $DO_APT -eq 1 ]]; then
-  echo "[3/6] Installing OS packages (python3-venv, i2c-tools, pin factory)"
+  step "Installing OS packages (python3-venv, i2c-tools, pin factory)"
   # Be tolerant of third-party repo signature issues; warn and continue so
   # Debian main packages can still be installed.
   if ! sudo apt-get update -y; then
-    echo "WARNING: 'apt-get update' returned an error (possibly due to a third-party repo). Continuing anyway..." >&2
+    warn "'apt-get update' returned an error (possibly due to a third-party repo). Continuing..."
   fi
   sudo apt-get install -y python3-venv i2c-tools
   case "$PIN_FACTORY" in
@@ -132,29 +157,29 @@ if [[ $DO_APT -eq 1 ]]; then
       sudo apt-get install -y python3-lgpio
       ;;
     native)
-      echo "Using gpiozero NativeFactory (no extra packages)"
+      printf "%s\n" "Using gpiozero NativeFactory (no extra packages)"
       ;;
     *) echo "Invalid --pin-factory value: $PIN_FACTORY" >&2; exit 1 ;;
   esac
 else
-  echo "[3/6] Skipping apt per flag"
+  step "Skipping apt per flag"
 fi
 
 if [[ $DO_PROFILE -eq 1 ]]; then
   if [[ "$PIN_FACTORY" == "pigpio" ]]; then
-    echo "[4/6] Setting GPIOZERO_PIN_FACTORY globally to pigpio"
+    step "Setting GPIOZERO_PIN_FACTORY globally to pigpio"
     printf '%s\n' 'export GPIOZERO_PIN_FACTORY=pigpio' | sudo tee /etc/profile.d/gpiozero.sh >/dev/null || true
   elif [[ "$PIN_FACTORY" == "lgpio" ]]; then
-    echo "[4/6] Setting GPIOZERO_PIN_FACTORY globally to lgpio"
+    step "Setting GPIOZERO_PIN_FACTORY globally to lgpio"
     printf '%s\n' 'export GPIOZERO_PIN_FACTORY=lgpio' | sudo tee /etc/profile.d/gpiozero.sh >/dev/null || true
   else
-    echo "[4/6] Not modifying /etc/profile.d for NativeFactory"
+    step "Not modifying /etc/profile.d for NativeFactory"
   fi
 else
-  echo "[4/6] Skipping /etc/profile.d changes per flag"
+  step "Skipping /etc/profile.d changes per flag"
 fi
 
-echo "[5/6] Creating venv and installing project + tests"
+step "Creating venv and installing project + tests"
 mkdir -p "$(dirname "$VENV_PATH")"
 python3 -m venv "$VENV_PATH" || true
 # shellcheck disable=SC1090
@@ -170,12 +195,12 @@ sudo mkdir -p /var/lib/lightning
 sudo chown "$USER":"$USER" /var/lib/lightning || true
 
 if [[ $RUN_TESTS -eq 1 ]]; then
-  echo "[6/6] Running mocked test suite"
+  step "Running mocked test suite"
   pytest -q || { echo "Mocked tests failed" >&2; exit 1; }
 fi
 
 if [[ $RUN_HW -eq 1 ]]; then
-  echo "[6/6] Running hardware smoke test"
+  step "Running hardware smoke test"
   export AS3935_TEST_REAL_HARDWARE=1
   export AS3935_I2C_ADDRESS="$ADDR"
   export AS3935_I2C_BUS="$BUS"
@@ -184,7 +209,7 @@ if [[ $RUN_HW -eq 1 ]]; then
 fi
 
 if [[ $INSTALL_SERVICES -eq 1 ]]; then
-  echo "[6/6] Installing and enabling systemd services"
+  step "Installing and enabling systemd services"
 
   require_cmd systemctl
   # Ensure service user and basic directories exist
@@ -283,12 +308,13 @@ EOF
   sudo systemctl enable --now lightning-collector.service || true
   sudo systemctl enable --now lightning-api.service || true
 
-  echo "Services installed. Edit $ENV_FILE to adjust DB and GPIO settings, then restart:"
-  echo "  sudo systemctl restart lightning-collector lightning-api"
+  printf "%s Services installed: lightning-collector, lightning-api\n" "$CHECK"
+  printf "%s\n" "Edit $ENV_FILE to adjust DB and GPIO settings, then restart:"
+  printf "  %s\n" "sudo systemctl restart lightning-collector lightning-api"
 fi
 
 echo
-echo "Setup complete. Next steps:"
+printf "${BOLD}Setup complete.${RESET}\n"
 echo "  1) Reboot once if you just enabled I2C or installed pigpio: sudo reboot"
 echo "  2) Activate venv:  source '$VENV_PATH/bin/activate'"
 echo "  3) Run example:   python examples/lightning_detection.py"
