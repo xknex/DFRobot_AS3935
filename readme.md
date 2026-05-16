@@ -166,6 +166,20 @@ python -m pytest tests/ -v
 
 The test suite (364 tests) runs without hardware using mocked I2C and GPIO. Includes property-based tests via Hypothesis covering the sensor driver, collector components, configuration, and REST API.
 
+### One-command Pi setup
+
+Use the helper script to prepare a Raspberry Pi (installs a pin factory, creates a venv, installs the project, and can run tests):
+
+```bash
+bash scripts/setup_pi.sh --run-tests --hardware-tests
+```
+
+Options:
+- `--pin-factory pigpio|lgpio|native` (default: `pigpio`)
+- `--venv-path ~/.venvs/DFRobot_AS3935` to choose venv location
+- `--run-tests` to run the mocked suite; `--hardware-tests` to run the real sensor smoke test
+- `--address 0x03 --bus 1 --irq 4` to override hardware test values
+
 ### Hardware-in-the-loop (optional)
 
 To exercise the real sensor on a Raspberry Pi, enable the hardware tests and provide connection details (defaults shown):
