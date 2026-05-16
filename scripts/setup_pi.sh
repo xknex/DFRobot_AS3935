@@ -18,6 +18,10 @@
 #   --address HEX                         I2C address for hardware test (default 0x03)
 #   --bus NUM                             I2C bus for hardware test (default 1)
 #   --irq NUM                             BCM IRQ pin for hardware test (default 4)
+#   --install-services                    Install and enable systemd units (collector, API)
+#   --service-user NAME                   System user to run services (default: lightning)
+#   --env-file PATH                       Environment file for services (default: /etc/lightning/environment)
+#   --workdir PATH                        Working directory for services (default: /opt/lightning)
 #   -h, --help                            Show help
 set -euo pipefail
 
@@ -31,6 +35,10 @@ RUN_HW=0
 ADDR="0x03"
 BUS="1"
 IRQ="4"
+INSTALL_SERVICES=0
+SERVICE_USER="lightning"
+ENV_FILE="/etc/lightning/environment"
+WORKDIR="/opt/lightning"
 
 usage() {
   sed -n '1,40p' "$0" | sed 's/^# \{0,1\}//'
@@ -48,6 +56,10 @@ while [[ $# -gt 0 ]]; do
     --address) ADDR="$2"; shift 2 ;;
     --bus) BUS="$2"; shift 2 ;;
     --irq) IRQ="$2"; shift 2 ;;
+    --install-services) INSTALL_SERVICES=1; shift ;;
+    --service-user) SERVICE_USER="$2"; shift 2 ;;
+    --env-file) ENV_FILE="$2"; shift 2 ;;
+    --workdir) WORKDIR="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage; exit 1 ;;
   esac
@@ -169,6 +181,110 @@ if [[ $RUN_HW -eq 1 ]]; then
   export AS3935_I2C_BUS="$BUS"
   export AS3935_IRQ_PIN="$IRQ"
   pytest -q -m hardware || { echo "Hardware smoke test failed" >&2; exit 1; }
+fi
+
+if [[ $INSTALL_SERVICES -eq 1 ]]; then
+  echo "[6/6] Installing and enabling systemd services"
+
+  require_cmd systemctl
+  # Ensure service user and basic directories exist
+  if ! id -u "$SERVICE_USER" >/dev/null 2>&1; then
+    sudo useradd --system --create-home --shell /usr/sbin/nologin "$SERVICE_USER" || true
+  fi
+  sudo mkdir -p "$(dirname "$ENV_FILE")" "$WORKDIR" /var/lib/lightning
+  sudo touch "$ENV_FILE"
+  sudo chown "$SERVICE_USER":"$SERVICE_USER" /var/lib/lightning || true
+  sudo chown root:root "$(dirname "$ENV_FILE")" || true
+
+  # Write a template env file if empty
+  if [[ ! -s "$ENV_FILE" ]]; then
+    TMP_ENV=$(mktemp)
+    cat > "$TMP_ENV" <<EOF
+# Lightning services environment
+# Edit these values to match your MariaDB and file locations.
+LIGHTNING_DB_HOST=localhost
+LIGHTNING_DB_PORT=3306
+LIGHTNING_DB_USER=lightning
+LIGHTNING_DB_PASSWORD=changeme
+LIGHTNING_DB_NAME=lightning
+LIGHTNING_CSV_FILE_PATH=/var/lib/lightning/events.csv
+
+# Pin factory for gpiozero (pigpio recommended if installed)
+GPIOZERO_PIN_FACTORY=${PIN_FACTORY}
+EOF
+    sudo mv "$TMP_ENV" "$ENV_FILE"
+    sudo chmod 640 "$ENV_FILE"
+  fi
+
+  # Resolve venv python path for ExecStart
+  VENV_PY="$VENV_PATH/bin/python"
+  if [[ ! -x "$VENV_PY" ]]; then
+    echo "Venv python not found at $VENV_PY" >&2; exit 1
+  fi
+
+  # Generate unit files with explicit venv python and pigpio dependency if selected
+  UNIT_DIR=/etc/systemd/system
+  TMP_API=$(mktemp)
+  TMP_COL=$(mktemp)
+  AFTER_NET="After=network-online.target"
+  WANTS_NET="Wants=network-online.target"
+  PIGPIO_DEPS=""
+  if [[ "$PIN_FACTORY" == "pigpio" ]]; then
+    PIGPIO_DEPS=$'Wants=pigpiod.service\nAfter=pigpiod.service'
+  fi
+
+  cat > "$TMP_API" <<EOF
+[Unit]
+Description=Lightning REST API Service
+$AFTER_NET
+$WANTS_NET
+$PIGPIO_DEPS
+
+[Service]
+Type=simple
+ExecStart=$VENV_PY -m lightning_api
+Restart=on-failure
+RestartSec=5
+EnvironmentFile=$ENV_FILE
+WorkingDirectory=$WORKDIR
+User=$SERVICE_USER
+Group=$SERVICE_USER
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  cat > "$TMP_COL" <<EOF
+[Unit]
+Description=Lightning Data Collector Service
+$AFTER_NET
+$WANTS_NET
+$PIGPIO_DEPS
+
+[Service]
+Type=simple
+ExecStart=$VENV_PY -m lightning_collector
+Restart=on-failure
+RestartSec=5
+EnvironmentFile=$ENV_FILE
+WorkingDirectory=$WORKDIR
+User=$SERVICE_USER
+Group=$SERVICE_USER
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  sudo mv "$TMP_API" "$UNIT_DIR/lightning-api.service"
+  sudo mv "$TMP_COL" "$UNIT_DIR/lightning-collector.service"
+  sudo chmod 644 "$UNIT_DIR/lightning-api.service" "$UNIT_DIR/lightning-collector.service"
+
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now lightning-collector.service || true
+  sudo systemctl enable --now lightning-api.service || true
+
+  echo "Services installed. Edit $ENV_FILE to adjust DB and GPIO settings, then restart:"
+  echo "  sudo systemctl restart lightning-collector lightning-api"
 fi
 
 echo

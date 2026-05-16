@@ -179,6 +179,8 @@ Options:
 - `--venv-path ~/.venvs/DFRobot_AS3935` to choose venv location
 - `--run-tests` to run the mocked suite; `--hardware-tests` to run the real sensor smoke test
 - `--address 0x03 --bus 1 --irq 4` to override hardware test values
+- `--install-services` to install and enable systemd units for the collector and API
+- `--service-user lightning` and `--env-file /etc/lightning/environment` to customize service user and env file
 
 ### Hardware-in-the-loop (optional)
 
