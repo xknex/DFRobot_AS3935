@@ -1,7 +1,12 @@
 """Shared test configuration and fixtures.
 
-Mocks hardware-dependent modules (smbus2, gpiozero) so tests can run
-on any platform without physical hardware.
+By default we mock hardware-dependent modules (``smbus2``, ``gpiozero``) so
+tests run anywhere without physical hardware. To run true hardware-in-the-loop
+tests on a Raspberry Pi with the AS3935 attached, set the environment variable
+``AS3935_TEST_REAL_HARDWARE=1`` before invoking pytest. In that mode, the
+global module mocks are NOT installed, allowing tests marked ``@pytest.mark.hardware``
+to exercise the real device. All other tests may still use the targeted
+``mock_smbus``/``mock_gpio`` fixtures as needed.
 
 Provides canonical shared fixtures:
 - ``mock_smbus``: Patches ``smbus2.SMBus`` and yields the bus instance mock.
@@ -10,12 +15,15 @@ Provides canonical shared fixtures:
 """
 
 import sys
+import os
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-# Mock hardware-dependent modules before any dfrobot_as3935 imports.
-# This allows tests to run on Windows/macOS where fcntl is unavailable.
+HARDWARE_MODE = os.getenv("AS3935_TEST_REAL_HARDWARE", "").lower() in {"1", "true", "yes", "on"}
+
+# Mock hardware-dependent modules before any dfrobot_as3935 imports unless we
+# explicitly opt into real-hardware testing.
 smbus2_mock = MagicMock()
 gpiozero_mock = MagicMock()
 mariadb_mock = MagicMock()
@@ -27,8 +35,9 @@ class _MariaDBError(Exception):
 
 mariadb_mock.Error = _MariaDBError
 
-sys.modules.setdefault("smbus2", smbus2_mock)
-sys.modules.setdefault("gpiozero", gpiozero_mock)
+if not HARDWARE_MODE:
+    sys.modules.setdefault("smbus2", smbus2_mock)
+    sys.modules.setdefault("gpiozero", gpiozero_mock)
 sys.modules.setdefault("fcntl", MagicMock())
 sys.modules.setdefault("mariadb", mariadb_mock)
 

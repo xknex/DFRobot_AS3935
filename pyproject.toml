@@ -52,4 +52,5 @@ markers = [
     "unit: Example-based unit tests",
     "integration: Tests requiring MariaDB connection",
     "smoke: Configuration and structure checks",
+    "hardware: Hardware-in-the-loop tests requiring AS3935 sensor",
 ]

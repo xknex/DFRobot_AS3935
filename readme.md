@@ -166,6 +166,21 @@ python -m pytest tests/ -v
 
 The test suite (364 tests) runs without hardware using mocked I2C and GPIO. Includes property-based tests via Hypothesis covering the sensor driver, collector components, configuration, and REST API.
 
+### Hardware-in-the-loop (optional)
+
+To exercise the real sensor on a Raspberry Pi, enable the hardware tests and provide connection details (defaults shown):
+
+```bash
+export AS3935_TEST_REAL_HARDWARE=1
+export AS3935_I2C_ADDRESS=0x03   # 0x01/0x02/0x03 per DIP switch
+export AS3935_I2C_BUS=1          # Typically 1 on Raspberry Pi
+export AS3935_IRQ_PIN=4          # BCM number for IRQ, default 4 (pin 7)
+
+pytest -q -m hardware
+```
+
+Leave `AS3935_TEST_REAL_HARDWARE` unset to run the fully mocked, portable tests.
+
 ## Compatibility
 
 | Board | Status |
