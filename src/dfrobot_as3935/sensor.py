@@ -113,7 +113,11 @@ class DFRobot_AS3935:
 
         # Phase 2: Acquire I2C bus
         try:
-            self._bus: smbus2.SMBus = smbus2.SMBus(bus)
+            # Use force=True to allow reserved 7-bit addresses (e.g., 0x03)
+            # which the AS3935 commonly uses. Linux I2C prohibits these by
+            # default and raises EINVAL; forcing the address aligns with how
+            # microcontroller environments access this device.
+            self._bus: smbus2.SMBus = smbus2.SMBus(bus, force=True)
         except OSError as e:
             logger.warning("Failed to open I2C bus %d: %s", bus, e)
             raise OSError(f"Failed to open I2C bus {bus}: {e}") from e
