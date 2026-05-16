@@ -44,6 +44,21 @@ step() {
 warn() { printf "%b%s%b\n" "$YELLOW" "$1" "$RESET" >&2; }
 die()  { printf "%b%s%b\n" "$RED" "$1" "$RESET" >&2; exit 1; }
 
+# Run pytest, capture final summary line, and fail with message on error.
+run_tests() {
+  local label="$1"; local outvar="$2"; shift 2
+  local outfile
+  outfile=$(mktemp)
+  pytest -q "$@" 2>&1 | tee "$outfile"
+  local code=${PIPESTATUS[0]}
+  local summary
+  summary=$(grep -E "(^[0-9]+ (passed|failed|skipped|xfailed|xpassed|warnings).*)|(=+ .* in .* =+)" "$outfile" | tail -n1 || true)
+  declare -g "$outvar"="${summary:-no summary}"
+  if [[ $code -ne 0 ]]; then
+    die "$label failed: ${summary:-see pytest output}"
+  fi
+}
+
 PIN_FACTORY="pigpio"
 VENV_PATH="${HOME}/.venvs/DFRobot_AS3935"
 DO_APT=1
@@ -194,9 +209,10 @@ pip install httpx
 sudo mkdir -p /var/lib/lightning
 sudo chown "$USER":"$USER" /var/lib/lightning || true
 
+MOCK_SUMMARY=""; HW_SUMMARY=""
 if [[ $RUN_TESTS -eq 1 ]]; then
   step "Running mocked test suite"
-  pytest -q || { echo "Mocked tests failed" >&2; exit 1; }
+  run_tests "Mocked tests" MOCK_SUMMARY
 fi
 
 if [[ $RUN_HW -eq 1 ]]; then
@@ -205,7 +221,7 @@ if [[ $RUN_HW -eq 1 ]]; then
   export AS3935_I2C_ADDRESS="$ADDR"
   export AS3935_I2C_BUS="$BUS"
   export AS3935_IRQ_PIN="$IRQ"
-  pytest -q -m hardware || { echo "Hardware smoke test failed" >&2; exit 1; }
+  run_tests "Hardware tests" HW_SUMMARY -m hardware
 fi
 
 if [[ $INSTALL_SERVICES -eq 1 ]]; then
@@ -314,6 +330,13 @@ EOF
 fi
 
 echo
+if [[ $RUN_TESTS -eq 1 || $RUN_HW -eq 1 ]]; then
+  printf "${BOLD}Tests complete.${RESET}\n"
+  [[ $RUN_TESTS -eq 1 ]] && echo "  Mocked:   ${MOCK_SUMMARY}"
+  [[ $RUN_HW -eq 1 ]] && echo "  Hardware: ${HW_SUMMARY}"
+  echo
+fi
+
 printf "${BOLD}Setup complete.${RESET}\n"
 echo "  1) Reboot once if you just enabled I2C or installed pigpio: sudo reboot"
 echo "  2) Activate venv:  source '$VENV_PATH/bin/activate'"
