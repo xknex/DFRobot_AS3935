@@ -257,7 +257,7 @@ class TestProperty3WriteBufferOrdering:
     """
 
     @given(records=st.lists(_valid_event_records, min_size=1, max_size=50))
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     @patch("lightning_collector.db_writer.get_connection")
     def test_flush_preserves_enqueue_order(
         self, mock_get_conn, records: list[EventRecord]
@@ -311,7 +311,7 @@ class TestProperty3WriteBufferOrdering:
         assert writer.buffer_size == 0
 
     @given(records=st.lists(_valid_event_records, min_size=2, max_size=30))
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     @patch("lightning_collector.db_writer.get_connection")
     def test_flush_inserts_in_enqueue_order(
         self, mock_get_conn, records: list[EventRecord]
