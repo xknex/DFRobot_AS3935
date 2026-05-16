@@ -68,12 +68,36 @@ if [[ $DO_APT -eq 1 ]]; then
   require_cmd apt-get
 fi
 
+enable_i2c_fallback() {
+  # Try to enable I2C by editing firmware config directly when raspi-config is absent.
+  # Supports both Raspberry Pi OS (/boot/config.txt) and Debian on Pi (/boot/firmware/config.txt).
+  for cfg in /boot/firmware/config.txt /boot/config.txt; do
+    if [[ -w "$cfg" || -w "${cfg}" ]]; then
+      echo "Attempting to enable I2C in $cfg"
+      sudo cp -n "$cfg" "${cfg}.bak" 2>/dev/null || true
+      if sudo grep -qE '^\s*dtparam=([^,]*,)*i2c_arm=on(,.*)?\s*$' "$cfg" 2>/dev/null; then
+        echo "I2C already enabled in $cfg"
+        return
+      fi
+      if sudo grep -qE '^\s*dtparam=([^,]*,)*i2c_arm=off(,.*)?\s*$' "$cfg" 2>/dev/null; then
+        sudo sed -i 's/\(dtparam=.*\)i2c_arm=off/\1i2c_arm=on/' "$cfg" || true
+      else
+        echo 'dtparam=i2c_arm=on' | sudo tee -a "$cfg" >/dev/null || true
+      fi
+      echo "I2C enable flag written to $cfg (reboot required)"
+      return
+    fi
+  done
+  echo "Could not locate a writable config.txt to enable I2C; please enable manually." >&2
+}
+
 if [[ $DO_I2C -eq 1 ]]; then
   if command -v raspi-config >/dev/null 2>&1; then
     echo "[2/6] Enabling I2C via raspi-config (non-interactive)"
-    sudo raspi-config nonint do_i2c 0 || echo "raspi-config I2C enable step returned non-zero; continuing"
+    sudo raspi-config nonint do_i2c 0 || echo "raspi-config I2C enable step returned non-zero; attempting fallback"
   else
-    echo "[2/6] raspi-config not found; skip I2C enable"
+    echo "[2/6] raspi-config not found; attempting config.txt fallback"
+    enable_i2c_fallback || true
   fi
 else
   echo "[2/6] Skipping I2C enable per flag"
@@ -81,7 +105,11 @@ fi
 
 if [[ $DO_APT -eq 1 ]]; then
   echo "[3/6] Installing OS packages (python3-venv, i2c-tools, pin factory)"
-  sudo apt-get update -y
+  # Be tolerant of third-party repo signature issues; warn and continue so
+  # Debian main packages can still be installed.
+  if ! sudo apt-get update -y; then
+    echo "WARNING: 'apt-get update' returned an error (possibly due to a third-party repo). Continuing anyway..." >&2
+  fi
   sudo apt-get install -y python3-venv i2c-tools
   case "$PIN_FACTORY" in
     pigpio)
