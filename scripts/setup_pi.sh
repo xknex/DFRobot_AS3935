@@ -101,15 +101,26 @@ db_wizard() {
       sudo systemctl enable --now mariadb || true
     fi
 
+    # Escape single quotes in password for SQL literals
+    esc_pass=${pass//\'/''}
+
     step "Creating database and user via root socket auth"
-    sudo mysql -u root <<SQL || die "Failed to create database/user via mysql root"
-CREATE DATABASE IF NOT EXISTS \`$db\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER IF NOT EXISTS '$user'@'localhost' IDENTIFIED BY '$pass';
-CREATE USER IF NOT EXISTS '$user'@'127.0.0.1' IDENTIFIED BY '$pass';
-GRANT ALL PRIVILEGES ON \`$db\`.* TO '$user'@'localhost';
-GRANT ALL PRIVILEGES ON \`$db\`.* TO '$user'@'127.0.0.1';
-FLUSH PRIVILEGES;
-SQL
+    TMP_SQL=$(mktemp)
+    {
+      printf "CREATE DATABASE IF NOT EXISTS \`%s\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\n" "$db"
+      printf "CREATE USER IF NOT EXISTS '%s'@'localhost' IDENTIFIED BY '%s';\n" "$user" "$esc_pass"
+      printf "CREATE USER IF NOT EXISTS '%s'@'127.0.0.1' IDENTIFIED BY '%s';\n" "$user" "$esc_pass"
+      printf "CREATE USER IF NOT EXISTS '%s'@'::1' IDENTIFIED BY '%s';\n" "$user" "$esc_pass"
+      printf "ALTER USER '%s'@'localhost' IDENTIFIED BY '%s';\n" "$user" "$esc_pass"
+      printf "ALTER USER '%s'@'127.0.0.1' IDENTIFIED BY '%s';\n" "$user" "$esc_pass"
+      printf "ALTER USER '%s'@'::1' IDENTIFIED BY '%s';\n" "$user" "$esc_pass"
+      printf "GRANT ALL PRIVILEGES ON \`%s\`.* TO '%s'@'localhost';\n" "$db" "$user"
+      printf "GRANT ALL PRIVILEGES ON \`%s\`.* TO '%s'@'127.0.0.1';\n" "$db" "$user"
+      printf "GRANT ALL PRIVILEGES ON \`%s\`.* TO '%s'@'::1';\n" "$db" "$user"
+      printf "FLUSH PRIVILEGES;\n"
+    } > "$TMP_SQL"
+    sudo mysql -u root < "$TMP_SQL" || { rm -f "$TMP_SQL"; die "Failed to create database/user via mysql root"; }
+    rm -f "$TMP_SQL"
 
   else
     host=$(prompt "DB host (remote)" "db.example.local")
