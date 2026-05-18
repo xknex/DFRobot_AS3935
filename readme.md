@@ -411,6 +411,22 @@ The REST API runs on port 8000 by default.
 
 Query parameters:
 
+### Quick API Check
+
+After installing services or running the API locally, verify it responds:
+
+```bash
+curl -sS http://127.0.0.1:8000/health | jq
+curl -sS "http://127.0.0.1:8000/events?page=1&page_size=5" | jq
+```
+
+Tips:
+- Prefer `127.0.0.1` to force TCP. Using `localhost` may try a Unix socket and fail if the DB isn’t local.
+- If health is `degraded`, ensure DB settings in `/etc/lightning/environment` are correct, then:
+```bash
+sudo systemctl restart lightning-db-apply lightning-api
+```
+
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `page` | int | 1 | Page number |
