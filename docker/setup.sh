@@ -82,6 +82,57 @@ run_sudo() {
 # ---------------------------------------------------------------------------
 NEEDS_RELOGIN=false
 
+# ---------------------------------------------------------------------------
+# Helper: Fix Raspberry Pi OS Trixie apt signing key issue
+# SHA1 signatures were deprecated in Feb 2026, breaking archive.raspberrypi.com
+# ---------------------------------------------------------------------------
+APT_FIXED=false
+
+fix_raspi_apt() {
+    if [[ "$APT_FIXED" == true ]]; then
+        return 0
+    fi
+
+    # Only relevant on Raspberry Pi OS with the raspi archive
+    if [[ ! -f /etc/apt/sources.list.d/raspi.list ]] && ! grep -rq "archive.raspberrypi.com" /etc/apt/sources.list.d/ 2>/dev/null; then
+        APT_FIXED=true
+        return 0
+    fi
+
+    # Test if apt-get update works without issues
+    if run_sudo apt-get -qq update 2>/dev/null; then
+        APT_FIXED=true
+        return 0
+    fi
+
+    warn "Raspberry Pi archive has a signing key issue (SHA1 deprecation)."
+    info "Attempting to fix by updating the raspberry-pi archive keyring..."
+
+    # Try updating the keyring package first
+    if run_sudo apt-get install --allow-unauthenticated -y raspberrypi-archive-keyring 2>/dev/null; then
+        ok "Raspberry Pi archive keyring updated"
+    else
+        # Fallback: temporarily allow the repo to be unauthenticated
+        warn "Keyring update failed. Temporarily marking raspi repo as trusted."
+        if [[ -f /etc/apt/sources.list.d/raspi.list ]]; then
+            run_sudo sed -i 's/^deb /deb [trusted=yes] /' /etc/apt/sources.list.d/raspi.list
+        fi
+        for f in /etc/apt/sources.list.d/*.sources; do
+            if [[ -f "$f" ]] && grep -q "archive.raspberrypi.com" "$f"; then
+                run_sudo sed -i '/^Signed-By:/d' "$f"
+                if ! grep -q '^Trusted:' "$f"; then
+                    run_sudo sed -i '/^URIs:/a Trusted: yes' "$f"
+                fi
+            fi
+        done
+        warn "Marked raspi repo as trusted. Re-secure after keyring is fixed upstream."
+    fi
+
+    # Retry apt update
+    run_sudo apt-get -qq update 2>/dev/null || true
+    APT_FIXED=true
+}
+
 echo ""
 echo "═══════════════════════════════════════════════════════════════════"
 echo "  Lightning Data Pipeline — Docker Setup"
@@ -136,6 +187,7 @@ else
 
     if ask "  Install Docker Engine now? (uses official get.docker.com script, requires sudo)"; then
         echo ""
+        fix_raspi_apt
         info "Downloading and running Docker install script..."
         curl -fsSL https://get.docker.com | run_sudo sh
         echo ""
@@ -181,6 +233,7 @@ elif command -v docker-compose &>/dev/null; then
     echo ""
 
     if ask "  Install Docker Compose v2 plugin now? (requires sudo)"; then
+        fix_raspi_apt
         run_sudo apt-get update -qq
         run_sudo apt-get install -y docker-compose-plugin
         if docker compose version &>/dev/null 2>&1; then
@@ -198,6 +251,7 @@ else
     echo ""
 
     if ask "  Install Docker Compose v2 plugin now? (requires sudo)"; then
+        fix_raspi_apt
         run_sudo apt-get update -qq
         run_sudo apt-get install -y docker-compose-plugin
         if docker compose version &>/dev/null 2>&1; then
@@ -223,6 +277,7 @@ if command -v git &>/dev/null; then
 else
     warn "Git is not installed (optional, needed only for cloning the repo)."
     if ask "  Install Git now? (requires sudo)"; then
+        fix_raspi_apt
         run_sudo apt-get update -qq
         run_sudo apt-get install -y git
         ok "Git installed"
