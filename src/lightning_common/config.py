@@ -87,6 +87,7 @@ class ApiSettings(BaseSettings):
     api_port: int = Field(default=8000, description="API port (1-65535)")
     cors_origins: list[str] = ["*"]
     db_pool_size: int = 5
+    allow_degraded_start: bool = True
 
     @field_validator("db_port", "api_port")
     @classmethod

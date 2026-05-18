@@ -95,13 +95,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Log configuration with masked credentials
     _log_config(settings)
 
-    # Create connection pool and confirm connectivity
+    # Create connection pool and confirm connectivity. On failure, optionally
+    # allow a degraded startup so that /health can report the issue instead
+    # of the service failing to boot entirely (useful on first-time setups).
     try:
         _pool = _create_pool(settings)
         _confirm_db_connectivity(_pool)
     except mariadb.Error:
         logger.exception("Failed to create database connection pool")
-        raise
+        if getattr(settings, "allow_degraded_start", False):
+            logger.warning("Starting API in degraded mode: database unavailable at startup")
+            _pool = None
+        else:
+            raise
 
     yield
 
