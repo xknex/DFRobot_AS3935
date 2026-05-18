@@ -188,13 +188,13 @@ Options:
 
 Two convenient paths are bundled into the setup script:
 
-Interactive (local or remote):
+Interactive:
 
 ```bash
 bash scripts/setup_pi.sh --db-wizard
 ```
 
-This will prompt for host/port/db/user/password, optionally install local MariaDB, create the database and user, write `/etc/lightning/environment`, create the `events` table, and run a connectivity check.
+This will prompt for host, port, database name, user, and password. If the host is a loopback address (`127.0.0.1` / `::1`) you will be offered the option to install MariaDB server locally. All connections use TCP — there is no distinction between "local" and "remote" at the driver level.
 
 Non-interactive (headless/CI):
 
@@ -223,6 +223,28 @@ sudo systemctl status lightning-db-apply --no-pager
 sudo systemctl status lightning-api --no-pager
 sudo systemctl status lightning-collector --no-pager
 ```
+
+### Managing Services
+
+Use `scripts/lightning.sh` to start, stop, restart, and check the status of all pipeline services:
+
+```bash
+# Apply to all services at once
+bash scripts/lightning.sh start
+bash scripts/lightning.sh stop
+bash scripts/lightning.sh restart
+bash scripts/lightning.sh status
+
+# Target a specific service: collector, api, or db
+bash scripts/lightning.sh restart api
+bash scripts/lightning.sh status collector
+
+# Follow logs (Ctrl-C to exit)
+bash scripts/lightning.sh logs -f
+bash scripts/lightning.sh logs api -f
+```
+
+The `db` target refers to the `lightning-db-apply` one-shot unit. Restarting it re-runs the schema-init and connectivity check.
 
 ### Hardware-in-the-loop (optional)
 

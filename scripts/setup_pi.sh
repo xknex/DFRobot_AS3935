@@ -78,57 +78,46 @@ prompt_secret() {
 db_wizard() {
   step "Database setup wizard"
 
-  # Ask local or remote
-  local mode
-  while true; do
-    mode=$(prompt "Setup database on this Pi (local) or use remote host? (local/remote)" "local")
-    [[ "$mode" == "local" || "$mode" == "remote" ]] && break
-    warn "Please enter 'local' or 'remote'"
-  done
+  local host port db user pass install_local=0
 
-  local host port db user pass
-  if [[ "$mode" == "local" ]]; then
-    host=$(prompt "DB host" "127.0.0.1")
-    port=$(prompt "DB port" "3306")
-    db=$(prompt "Database name" "lightning")
-    user=$(prompt "Database user" "lightning")
-    pass=$(prompt_secret "Database password for user '$user'")
+  host=$(prompt "DB host" "127.0.0.1")
+  port=$(prompt "DB port" "3306")
+  db=$(prompt "Database name" "lightning")
+  user=$(prompt "Database user" "lightning")
+  pass=$(prompt_secret "Database password for user '$user'")
 
-    if [[ $DO_APT -eq 1 ]]; then
-      step "Installing MariaDB server and client (local)"
-      if ! sudo apt-get install -y mariadb-server mariadb-client libmariadb-dev; then
-        warn "apt install mariadb-server failed; continuing"
-      fi
-      sudo systemctl enable --now mariadb || true
+  # Offer to install MariaDB server locally only when host is loopback
+  if [[ "$host" == "127.0.0.1" || "$host" == "localhost" || "$host" == "::1" ]]; then
+    local ans
+    ans=$(prompt "Install MariaDB server on this machine? (yes/no)" "no")
+    [[ "$ans" == "yes" || "$ans" == "y" ]] && install_local=1
+  fi
+
+  if [[ $install_local -eq 1 && $DO_APT -eq 1 ]]; then
+    step "Installing MariaDB server and client"
+    if ! sudo apt-get install -y mariadb-server mariadb-client libmariadb-dev; then
+      warn "apt install mariadb-server failed; continuing"
     fi
+    sudo systemctl enable --now mariadb || true
 
     # Escape single quotes in password for SQL literals
-    esc_pass=${pass//\'/''}
+    local esc_pass="${pass//\'/'\'}"
 
     step "Creating database and user via root socket auth"
+    local TMP_SQL
     TMP_SQL=$(mktemp)
     {
       printf "CREATE DATABASE IF NOT EXISTS \`%s\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;\n" "$db"
-      printf "CREATE USER IF NOT EXISTS '%s'@'localhost' IDENTIFIED BY '%s';\n" "$user" "$esc_pass"
       printf "CREATE USER IF NOT EXISTS '%s'@'127.0.0.1' IDENTIFIED BY '%s';\n" "$user" "$esc_pass"
       printf "CREATE USER IF NOT EXISTS '%s'@'::1' IDENTIFIED BY '%s';\n" "$user" "$esc_pass"
-      printf "ALTER USER '%s'@'localhost' IDENTIFIED BY '%s';\n" "$user" "$esc_pass"
       printf "ALTER USER '%s'@'127.0.0.1' IDENTIFIED BY '%s';\n" "$user" "$esc_pass"
       printf "ALTER USER '%s'@'::1' IDENTIFIED BY '%s';\n" "$user" "$esc_pass"
-      printf "GRANT ALL PRIVILEGES ON \`%s\`.* TO '%s'@'localhost';\n" "$db" "$user"
       printf "GRANT ALL PRIVILEGES ON \`%s\`.* TO '%s'@'127.0.0.1';\n" "$db" "$user"
       printf "GRANT ALL PRIVILEGES ON \`%s\`.* TO '%s'@'::1';\n" "$db" "$user"
       printf "FLUSH PRIVILEGES;\n"
     } > "$TMP_SQL"
     sudo mysql -u root < "$TMP_SQL" || { rm -f "$TMP_SQL"; die "Failed to create database/user via mysql root"; }
     rm -f "$TMP_SQL"
-
-  else
-    host=$(prompt "DB host (remote)" "db.example.local")
-    port=$(prompt "DB port" "3306")
-    db=$(prompt "Database name" "lightning")
-    user=$(prompt "Database user (must exist or have create privileges)" "lightning")
-    pass=$(prompt_secret "Database password for user '$user'")
   fi
 
   # Persist env (systemd-safe quoting: escape %, \ and ")
