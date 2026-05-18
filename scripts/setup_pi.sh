@@ -29,8 +29,8 @@ set -euo pipefail
 ENABLE_COLOR=1
 if [[ -n "${NO_COLOR:-}" || ! -t 1 ]] || ! command -v tput >/dev/null 2>&1; then ENABLE_COLOR=0; fi
 if [[ $ENABLE_COLOR -eq 1 ]]; then
-  BOLD="\e[1m"; DIM="\e[2m"; RESET="\e[0m";
-  RED="\e[31m"; GREEN="\e[32m"; YELLOW="\e[33m"; CYAN="\e[36m";
+  BOLD=$'\e[1m'; DIM=$'\e[2m'; RESET=$'\e[0m';
+  RED=$'\e[31m'; GREEN=$'\e[32m'; YELLOW=$'\e[33m'; CYAN=$'\e[36m';
   CHECK="${GREEN}✔${RESET}"; ARROW="${CYAN}➜${RESET}";
 else
   BOLD=""; DIM=""; RESET=""; RED=""; GREEN=""; YELLOW=""; CYAN=""; CHECK="[OK]"; ARROW=">";
@@ -196,7 +196,11 @@ fi
 
 step "Creating venv and installing project + tests"
 mkdir -p "$(dirname "$VENV_PATH")"
-python3 -m venv "$VENV_PATH" || true
+if [[ ! -x "$VENV_PATH/bin/python" ]]; then
+  # Include system site-packages so apt-installed GPIO backends (python3-pigpio,
+  # python3-lgpio) are visible inside the venv on Raspberry Pi / Debian.
+  python3 -m venv --system-site-packages "$VENV_PATH"
+fi
 # shellcheck disable=SC1090
 source "$VENV_PATH/bin/activate"
 pip install -U pip setuptools wheel
@@ -204,6 +208,19 @@ cd "$REPO_DIR"
 pip install -e '.[test]'
 # FastAPI tests require httpx explicitly
 pip install httpx
+
+# Ensure selected gpiozero backend is importable in this venv.
+if [[ "$PIN_FACTORY" == "pigpio" ]]; then
+  if ! python -c "import pigpio" >/dev/null 2>&1; then
+    warn "Python module 'pigpio' not found in venv; attempting pip install pigpio"
+    pip install pigpio || die "Failed to install 'pigpio'. Install python3-pigpio system package or rerun with --pin-factory lgpio/native."
+  fi
+elif [[ "$PIN_FACTORY" == "lgpio" ]]; then
+  if ! python -c "import lgpio" >/dev/null 2>&1; then
+    warn "Python module 'lgpio' not found in venv; attempting pip install lgpio"
+    pip install lgpio || die "Failed to install 'lgpio'. Install python3-lgpio system package or rerun with --pin-factory pigpio/native."
+  fi
+fi
 
 # Create CSV directory (optional but useful for collector)
 sudo mkdir -p /var/lib/lightning
