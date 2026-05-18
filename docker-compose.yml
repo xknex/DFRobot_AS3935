@@ -1,0 +1,69 @@
+# =============================================================================
+# Lightning Data Pipeline — Docker Compose
+# =============================================================================
+# First-deployment behavior:
+#   1. MariaDB starts and creates the database + user from MARIADB_* env vars
+#   2. db-init container waits for MariaDB, creates the schema, then exits
+#   3. lightning-api container waits for db-init, validates env, then starts
+#
+# All configuration is driven by the .env file. Copy .env.sample → .env and
+# fill in your values before running: docker compose up -d
+#
+# The lightning-collector service is NOT included here because it requires
+# direct I2C/GPIO access to the AS3935 sensor on a Raspberry Pi. Run it
+# natively on the Pi host, pointing LIGHTNING_DB_HOST at this MariaDB instance.
+# =============================================================================
+
+services:
+  mariadb:
+    image: mariadb:11
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD}
+      MARIADB_DATABASE: ${LIGHTNING_DB_NAME}
+      MARIADB_USER: ${LIGHTNING_DB_USER}
+      MARIADB_PASSWORD: ${LIGHTNING_DB_PASSWORD}
+    ports:
+      - "${LIGHTNING_DB_PORT:-3306}:3306"
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    networks:
+      - lightning-net
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  db-init:
+    build: .
+    env_file: .env
+    command: ["db-init"]
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    networks:
+      - lightning-net
+    restart: "no"
+
+  lightning-api:
+    build: .
+    env_file: .env
+    command: ["api"]
+    ports:
+      - "${LIGHTNING_API_PORT:-8000}:${LIGHTNING_API_PORT:-8000}"
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+    networks:
+      - lightning-net
+    restart: unless-stopped
+
+volumes:
+  mariadb_data:
+
+networks:
+  lightning-net:
+    driver: bridge

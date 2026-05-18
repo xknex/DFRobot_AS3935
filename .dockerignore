@@ -1,0 +1,64 @@
+# =============================================================================
+# Docker build context exclusions
+# =============================================================================
+
+# Version control
+.git/
+.gitignore
+
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+
+# Testing
+.pytest_cache/
+.hypothesis/
+tests/
+htmlcov/
+.coverage
+
+# IDE / Editor
+.kiro/
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docker files (no need to copy compose/ignore into the image)
+Dockerfile
+docker-compose.yml
+.dockerignore
+# Note: docker/ directory IS included (contains entrypoint.py)
+
+# Environment and secrets
+.env
+lightning.toml
+
+# Documentation and non-runtime files
+*.md
+LICENSE
+resources/
+docs/
+
+# Legacy code not needed at runtime
+python/
+MicroPython/
+examples/
+scripts/
+systemd/
+
+# Arduino/C++ files (not relevant for the Python container)
+*.cpp
+*.h
+keywords.txt
+library.properties
