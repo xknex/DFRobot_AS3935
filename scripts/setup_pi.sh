@@ -146,6 +146,13 @@ EOF
   sudo mv "$TMP_ENV" "$ENV_FILE"
   sudo chmod 640 "$ENV_FILE"
 
+  # Export the same values for immediate use in the following Python steps
+  export LIGHTNING_DB_HOST="$host"
+  export LIGHTNING_DB_PORT="$port"
+  export LIGHTNING_DB_USER="$user"
+  export LIGHTNING_DB_PASSWORD="$pass"
+  export LIGHTNING_DB_NAME="$db"
+
   # Initialize schema using project helper
   step "Initializing database schema (events table)"
   python - <<PY || die "Schema initialization failed"
@@ -171,11 +178,6 @@ except Exception as e:
 PY
 
   step "Verifying connectivity with service env"
-  export LIGHTNING_DB_HOST="$host"
-  export LIGHTNING_DB_PORT="$port"
-  export LIGHTNING_DB_USER="$user"
-  export LIGHTNING_DB_PASSWORD="$pass"
-  export LIGHTNING_DB_NAME="$db"
   python - <<PY || die "Connectivity check failed"
 import os, sys
 import mariadb
