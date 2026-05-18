@@ -11,11 +11,12 @@
 #   bash docker/setup.sh --quiet  # Non-interactive: uses defaults, no prompts
 #
 # What it does:
-#   1. Copies .env.sample → .env (if .env doesn't exist yet)
-#   2. Detects I2C_GID and GPIO_GID from the host system
-#   3. Writes them into .env
-#   4. Validates that required hardware devices exist
-#   5. Reminds you to set passwords before starting
+#   1. Checks system requirements (Docker, Docker Compose, kernel modules)
+#   2. Copies .env.sample → .env (if .env doesn't exist yet)
+#   3. Detects I2C_GID and GPIO_GID from the host system
+#   4. Writes them into .env
+#   5. Validates that required hardware devices exist
+#   6. Reminds you to set passwords before starting
 # =============================================================================
 
 set -euo pipefail
@@ -49,9 +50,112 @@ echo "════════════════════════�
 echo ""
 
 # ---------------------------------------------------------------------------
-# Step 1: Create .env from sample if it doesn't exist
+# Step 1: System requirements check
 # ---------------------------------------------------------------------------
-info "Step 1/4: Checking .env file..."
+info "Step 1/5: Checking system requirements..."
+
+PREREQ_OK=true
+
+# --- Docker Engine ---
+if command -v docker &>/dev/null; then
+    DOCKER_VERSION=$(docker --version 2>/dev/null | grep -oP '\d+\.\d+\.\d+' | head -1 || echo "unknown")
+    ok "Docker Engine installed: v$DOCKER_VERSION"
+
+    # Check if Docker daemon is running
+    if docker info &>/dev/null; then
+        ok "Docker daemon is running"
+    else
+        error "Docker daemon is NOT running or current user lacks permissions."
+        error "  Fix (start daemon):   sudo systemctl start docker"
+        error "  Fix (user access):    sudo usermod -aG docker \$USER"
+        error "                        Then log out and back in."
+        PREREQ_OK=false
+    fi
+else
+    error "Docker Engine is NOT installed."
+    error "  Install on Raspberry Pi OS:"
+    error "    curl -fsSL https://get.docker.com | sh"
+    error "    sudo usermod -aG docker \$USER"
+    error "    # Log out and back in, then re-run this script."
+    PREREQ_OK=false
+fi
+
+# --- Docker Compose (v2 plugin) ---
+if docker compose version &>/dev/null 2>&1; then
+    COMPOSE_VERSION=$(docker compose version --short 2>/dev/null || docker compose version 2>/dev/null | grep -oP '\d+\.\d+\.\d+' | head -1 || echo "unknown")
+    ok "Docker Compose installed: v$COMPOSE_VERSION"
+elif command -v docker-compose &>/dev/null; then
+    # Legacy standalone docker-compose (v1)
+    COMPOSE_VERSION=$(docker-compose --version 2>/dev/null | grep -oP '\d+\.\d+\.\d+' | head -1 || echo "unknown")
+    warn "Found legacy docker-compose (v1): v$COMPOSE_VERSION"
+    warn "  The compose file uses features that require Docker Compose v2+."
+    warn "  Upgrade: sudo apt install docker-compose-plugin"
+    warn "  Or:      https://docs.docker.com/compose/install/linux/"
+    PREREQ_OK=false
+else
+    error "Docker Compose is NOT installed."
+    error "  Install the Compose plugin:"
+    error "    sudo apt install docker-compose-plugin"
+    error "  Or install Docker with the convenience script (includes Compose):"
+    error "    curl -fsSL https://get.docker.com | sh"
+    PREREQ_OK=false
+fi
+
+# --- Git (optional but useful) ---
+if command -v git &>/dev/null; then
+    GIT_VERSION=$(git --version 2>/dev/null | grep -oP '\d+\.\d+\.\d+' | head -1 || echo "unknown")
+    ok "Git installed: v$GIT_VERSION"
+else
+    warn "Git is not installed (optional, needed only for cloning the repo)."
+    warn "  Install: sudo apt install git"
+fi
+
+# --- I2C kernel modules ---
+if lsmod 2>/dev/null | grep -q 'i2c_dev'; then
+    ok "Kernel module loaded: i2c_dev"
+else
+    warn "Kernel module 'i2c_dev' is NOT loaded."
+    warn "  Fix: sudo modprobe i2c-dev"
+    warn "  Persist: echo 'i2c-dev' | sudo tee /etc/modules-load.d/i2c.conf"
+    # Not a hard failure — the device check later will catch this
+fi
+
+if lsmod 2>/dev/null | grep -q 'i2c_bcm2835\|i2c_bcm2708'; then
+    ok "Kernel module loaded: i2c_bcm2835 (or bcm2708)"
+else
+    warn "Kernel module 'i2c_bcm2835' is NOT loaded."
+    warn "  This is usually loaded automatically when I2C is enabled."
+    warn "  Fix: sudo raspi-config → Interface Options → I2C → Enable"
+fi
+
+# --- Architecture info ---
+ARCH=$(uname -m)
+info "Architecture: $ARCH"
+if [[ "$ARCH" == "aarch64" || "$ARCH" == "armv7l" || "$ARCH" == "armv6l" ]]; then
+    ok "ARM architecture detected (Raspberry Pi compatible)"
+else
+    warn "Non-ARM architecture detected ($ARCH)."
+    warn "  The collector service requires a Raspberry Pi with GPIO/I2C."
+    warn "  The API and MariaDB services will work on any architecture."
+fi
+
+echo ""
+if [[ "$PREREQ_OK" == true ]]; then
+    ok "All system requirements satisfied."
+else
+    echo ""
+    error "═══════════════════════════════════════════════════════════════════"
+    error "  Some system requirements are NOT met. Fix the errors above"
+    error "  and re-run this script:  bash docker/setup.sh"
+    error "═══════════════════════════════════════════════════════════════════"
+    echo ""
+    exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# Step 2: Create .env from sample if it doesn't exist
+# ---------------------------------------------------------------------------
+info "Step 2/5: Checking .env file..."
 
 if [[ -f "$ENV_FILE" ]]; then
     ok ".env already exists at: $ENV_FILE"
@@ -67,9 +171,9 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Step 2: Detect I2C group ID
+# Step 3: Detect I2C group ID
 # ---------------------------------------------------------------------------
-info "Step 2/4: Detecting I2C group ID..."
+info "Step 3/5: Detecting I2C group ID..."
 
 I2C_GID=""
 
@@ -101,9 +205,9 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Step 3: Detect GPIO group ID
+# Step 4: Detect GPIO group ID
 # ---------------------------------------------------------------------------
-info "Step 3/4: Detecting GPIO group ID..."
+info "Step 4/5: Detecting GPIO group ID..."
 
 GPIO_GID=""
 
@@ -160,9 +264,9 @@ fi
 ok "I2C_GID=$I2C_GID and GPIO_GID=$GPIO_GID written to .env"
 
 # ---------------------------------------------------------------------------
-# Step 4: Validate hardware devices
+# Step 5: Validate hardware devices
 # ---------------------------------------------------------------------------
-info "Step 4/4: Checking hardware devices..."
+info "Step 5/5: Checking hardware devices..."
 
 ALL_OK=true
 
