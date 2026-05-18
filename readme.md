@@ -181,6 +181,48 @@ Options:
 - `--address 0x03 --bus 1 --irq 4` to override hardware test values
 - `--install-services` to install and enable systemd units for the collector and API
 - `--service-user lightning` and `--env-file /etc/lightning/environment` to customize service user and env file
+- `--db-wizard` to interactively create a local/remote MariaDB, write env, initialize schema, and verify
+- `--db-apply` to non-interactively read `/etc/lightning/environment`, ensure schema, and verify
+
+### Database Setup
+
+Two convenient paths are bundled into the setup script:
+
+Interactive (local or remote):
+
+```bash
+bash scripts/setup_pi.sh --db-wizard
+```
+
+This will prompt for host/port/db/user/password, optionally install local MariaDB, create the database and user, write `/etc/lightning/environment`, create the `events` table, and run a connectivity check.
+
+Non-interactive (headless/CI):
+
+```bash
+# Ensure /etc/lightning/environment exists first
+sudo tee /etc/lightning/environment >/dev/null <<'EOF'
+LIGHTNING_DB_HOST=127.0.0.1
+LIGHTNING_DB_PORT=3306
+LIGHTNING_DB_USER=lightning
+LIGHTNING_DB_PASSWORD=changeme
+LIGHTNING_DB_NAME=lightning
+EOF
+sudo chmod 640 /etc/lightning/environment
+
+bash scripts/setup_pi.sh --db-apply
+```
+
+### Service Bootstrap (DB one-shot)
+
+When you install services with `--install-services`, a one-shot unit `lightning-db-apply.service` is also installed. It ensures the schema exists (and verifies DB connectivity) before starting `lightning-api` and `lightning-collector`.
+
+Quick check:
+
+```bash
+sudo systemctl status lightning-db-apply --no-pager
+sudo systemctl status lightning-api --no-pager
+sudo systemctl status lightning-collector --no-pager
+```
 
 ### Hardware-in-the-loop (optional)
 
