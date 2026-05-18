@@ -3,15 +3,16 @@
 # Lightning Data Pipeline — Docker Setup Script
 # =============================================================================
 # Run this once on the Raspberry Pi before 'docker compose up'.
-# It creates .env from .env.sample (if not present) and auto-detects the
-# host's I2C and GPIO group IDs needed for hardware device passthrough.
+# Checks system requirements and offers to install missing components
+# interactively, then configures the environment for hardware passthrough.
 #
 # Usage:
-#   bash docker/setup.sh          # Interactive: prompts for missing passwords
-#   bash docker/setup.sh --quiet  # Non-interactive: uses defaults, no prompts
+#   bash docker/setup.sh          # Interactive: offers to install missing deps
+#   bash docker/setup.sh --quiet  # Non-interactive: skips installs, exits on errors
 #
 # What it does:
 #   1. Checks system requirements (Docker, Docker Compose, kernel modules)
+#      and offers to install missing components
 #   2. Copies .env.sample → .env (if .env doesn't exist yet)
 #   3. Detects I2C_GID and GPIO_GID from the host system
 #   4. Writes them into .env
@@ -31,6 +32,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+BOLD='\033[1m'
 NC='\033[0m' # No Color
 
 QUIET=false
@@ -43,6 +45,43 @@ ok()    { echo -e "${GREEN}[OK]${NC}    $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 error() { echo -e "${RED}[ERROR]${NC} $*"; }
 
+# ---------------------------------------------------------------------------
+# Helper: Ask yes/no question (returns 0 for yes, 1 for no)
+# In --quiet mode, always returns 1 (no)
+# ---------------------------------------------------------------------------
+ask() {
+    if [[ "$QUIET" == true ]]; then
+        return 1
+    fi
+    local prompt="$1"
+    local reply
+    echo -en "${BOLD}$prompt [y/N]:${NC} "
+    read -r reply
+    [[ "$reply" =~ ^[Yy]([Ee][Ss])?$ ]]
+}
+
+# ---------------------------------------------------------------------------
+# Helper: Run a command with sudo, prompting for password if needed
+# ---------------------------------------------------------------------------
+run_sudo() {
+    if [[ $EUID -eq 0 ]]; then
+        "$@"
+    else
+        # Validate sudo access (will prompt for password if needed)
+        if ! sudo -v 2>/dev/null; then
+            echo ""
+            info "This action requires administrator privileges."
+            sudo -v
+        fi
+        sudo "$@"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Helper: Track if a relogin is needed
+# ---------------------------------------------------------------------------
+NEEDS_RELOGIN=false
+
 echo ""
 echo "═══════════════════════════════════════════════════════════════════"
 echo "  Lightning Data Pipeline — Docker Setup"
@@ -50,9 +89,10 @@ echo "════════════════════════�
 echo ""
 
 # ---------------------------------------------------------------------------
-# Step 1: System requirements check
+# Step 1: System requirements check (with interactive install)
 # ---------------------------------------------------------------------------
 info "Step 1/5: Checking system requirements..."
+echo ""
 
 PREREQ_OK=true
 
@@ -66,40 +106,115 @@ if command -v docker &>/dev/null; then
         ok "Docker daemon is running"
     else
         error "Docker daemon is NOT running or current user lacks permissions."
-        error "  Fix (start daemon):   sudo systemctl start docker"
-        error "  Fix (user access):    sudo usermod -aG docker \$USER"
-        error "                        Then log out and back in."
-        PREREQ_OK=false
+        echo ""
+
+        # Try to start the daemon
+        if ask "  Start Docker daemon now? (requires sudo)"; then
+            run_sudo systemctl start docker
+            run_sudo systemctl enable docker
+            ok "Docker daemon started and enabled"
+
+            # Check if user is in docker group
+            if ! groups | grep -q docker; then
+                warn "Current user is not in the 'docker' group."
+                if ask "  Add '$USER' to the docker group? (requires sudo)"; then
+                    run_sudo usermod -aG docker "$USER"
+                    ok "Added '$USER' to docker group"
+                    NEEDS_RELOGIN=true
+                    warn "You must log out and back in for group changes to take effect."
+                else
+                    PREREQ_OK=false
+                fi
+            fi
+        else
+            PREREQ_OK=false
+        fi
     fi
 else
     error "Docker Engine is NOT installed."
-    error "  Install on Raspberry Pi OS:"
-    error "    curl -fsSL https://get.docker.com | sh"
-    error "    sudo usermod -aG docker \$USER"
-    error "    # Log out and back in, then re-run this script."
-    PREREQ_OK=false
+    echo ""
+
+    if ask "  Install Docker Engine now? (uses official get.docker.com script, requires sudo)"; then
+        echo ""
+        info "Downloading and running Docker install script..."
+        curl -fsSL https://get.docker.com | run_sudo sh
+        echo ""
+
+        if command -v docker &>/dev/null; then
+            DOCKER_VERSION=$(docker --version 2>/dev/null | grep -oP '\d+\.\d+\.\d+' | head -1 || echo "unknown")
+            ok "Docker Engine installed: v$DOCKER_VERSION"
+
+            # Enable and start
+            run_sudo systemctl enable docker
+            run_sudo systemctl start docker
+            ok "Docker daemon started and enabled"
+
+            # Add user to docker group
+            if ! groups | grep -q docker; then
+                if ask "  Add '$USER' to the docker group? (avoids needing sudo for docker commands)"; then
+                    run_sudo usermod -aG docker "$USER"
+                    ok "Added '$USER' to docker group"
+                    NEEDS_RELOGIN=true
+                fi
+            fi
+        else
+            error "Docker installation failed. Check the output above."
+            PREREQ_OK=false
+        fi
+    else
+        error "Docker is required. Install manually:"
+        error "  curl -fsSL https://get.docker.com | sh"
+        PREREQ_OK=false
+    fi
 fi
+
+echo ""
 
 # --- Docker Compose (v2 plugin) ---
 if docker compose version &>/dev/null 2>&1; then
     COMPOSE_VERSION=$(docker compose version --short 2>/dev/null || docker compose version 2>/dev/null | grep -oP '\d+\.\d+\.\d+' | head -1 || echo "unknown")
-    ok "Docker Compose installed: v$COMPOSE_VERSION"
+    ok "Docker Compose v2 installed: v$COMPOSE_VERSION"
 elif command -v docker-compose &>/dev/null; then
-    # Legacy standalone docker-compose (v1)
     COMPOSE_VERSION=$(docker-compose --version 2>/dev/null | grep -oP '\d+\.\d+\.\d+' | head -1 || echo "unknown")
     warn "Found legacy docker-compose (v1): v$COMPOSE_VERSION"
-    warn "  The compose file uses features that require Docker Compose v2+."
-    warn "  Upgrade: sudo apt install docker-compose-plugin"
-    warn "  Or:      https://docs.docker.com/compose/install/linux/"
-    PREREQ_OK=false
+    warn "  This project requires Docker Compose v2+."
+    echo ""
+
+    if ask "  Install Docker Compose v2 plugin now? (requires sudo)"; then
+        run_sudo apt-get update -qq
+        run_sudo apt-get install -y docker-compose-plugin
+        if docker compose version &>/dev/null 2>&1; then
+            COMPOSE_VERSION=$(docker compose version --short 2>/dev/null || echo "unknown")
+            ok "Docker Compose v2 installed: v$COMPOSE_VERSION"
+        else
+            error "Docker Compose v2 installation failed."
+            PREREQ_OK=false
+        fi
+    else
+        PREREQ_OK=false
+    fi
 else
     error "Docker Compose is NOT installed."
-    error "  Install the Compose plugin:"
-    error "    sudo apt install docker-compose-plugin"
-    error "  Or install Docker with the convenience script (includes Compose):"
-    error "    curl -fsSL https://get.docker.com | sh"
-    PREREQ_OK=false
+    echo ""
+
+    if ask "  Install Docker Compose v2 plugin now? (requires sudo)"; then
+        run_sudo apt-get update -qq
+        run_sudo apt-get install -y docker-compose-plugin
+        if docker compose version &>/dev/null 2>&1; then
+            COMPOSE_VERSION=$(docker compose version --short 2>/dev/null || echo "unknown")
+            ok "Docker Compose v2 installed: v$COMPOSE_VERSION"
+        else
+            error "Docker Compose installation failed. Try installing Docker first."
+            PREREQ_OK=false
+        fi
+    else
+        error "Docker Compose v2 is required. Install manually:"
+        error "  sudo apt install docker-compose-plugin"
+        PREREQ_OK=false
+    fi
 fi
+
+echo ""
 
 # --- Git (optional but useful) ---
 if command -v git &>/dev/null; then
@@ -107,17 +222,34 @@ if command -v git &>/dev/null; then
     ok "Git installed: v$GIT_VERSION"
 else
     warn "Git is not installed (optional, needed only for cloning the repo)."
-    warn "  Install: sudo apt install git"
+    if ask "  Install Git now? (requires sudo)"; then
+        run_sudo apt-get update -qq
+        run_sudo apt-get install -y git
+        ok "Git installed"
+    fi
 fi
 
+echo ""
+
 # --- I2C kernel modules ---
+I2C_MODULE_LOADED=true
+
 if lsmod 2>/dev/null | grep -q 'i2c_dev'; then
     ok "Kernel module loaded: i2c_dev"
 else
     warn "Kernel module 'i2c_dev' is NOT loaded."
-    warn "  Fix: sudo modprobe i2c-dev"
-    warn "  Persist: echo 'i2c-dev' | sudo tee /etc/modules-load.d/i2c.conf"
-    # Not a hard failure — the device check later will catch this
+    I2C_MODULE_LOADED=false
+
+    if ask "  Load i2c-dev module now and persist across reboots? (requires sudo)"; then
+        run_sudo modprobe i2c-dev
+        echo 'i2c-dev' | run_sudo tee /etc/modules-load.d/i2c.conf >/dev/null
+        if lsmod | grep -q 'i2c_dev'; then
+            ok "Kernel module i2c_dev loaded and persisted"
+            I2C_MODULE_LOADED=true
+        else
+            warn "Failed to load i2c_dev. I2C may not be enabled in raspi-config."
+        fi
+    fi
 fi
 
 if lsmod 2>/dev/null | grep -q 'i2c_bcm2835\|i2c_bcm2708'; then
@@ -125,8 +257,24 @@ if lsmod 2>/dev/null | grep -q 'i2c_bcm2835\|i2c_bcm2708'; then
 else
     warn "Kernel module 'i2c_bcm2835' is NOT loaded."
     warn "  This is usually loaded automatically when I2C is enabled."
-    warn "  Fix: sudo raspi-config → Interface Options → I2C → Enable"
+
+    if command -v raspi-config &>/dev/null; then
+        if ask "  Enable I2C interface via raspi-config now? (requires sudo)"; then
+            run_sudo raspi-config nonint do_i2c 0
+            # Try loading the module
+            run_sudo modprobe i2c-bcm2835 2>/dev/null || true
+            if lsmod | grep -q 'i2c_bcm2835\|i2c_bcm2708'; then
+                ok "I2C enabled and kernel module loaded"
+            else
+                warn "I2C enabled but module not yet loaded. A reboot may be required."
+            fi
+        fi
+    else
+        warn "  raspi-config not found. Enable I2C manually or ensure this is a Pi."
+    fi
 fi
+
+echo ""
 
 # --- Architecture info ---
 ARCH=$(uname -m)
@@ -140,6 +288,19 @@ else
 fi
 
 echo ""
+
+# --- Summary ---
+if [[ "$NEEDS_RELOGIN" == true ]]; then
+    echo ""
+    warn "═══════════════════════════════════════════════════════════════════"
+    warn "  You were added to the 'docker' group. You MUST log out and"
+    warn "  log back in (or reboot) for this to take effect, then re-run:"
+    warn "    bash docker/setup.sh"
+    warn "═══════════════════════════════════════════════════════════════════"
+    echo ""
+    exit 0
+fi
+
 if [[ "$PREREQ_OK" == true ]]; then
     ok "All system requirements satisfied."
 else
@@ -155,6 +316,7 @@ fi
 # ---------------------------------------------------------------------------
 # Step 2: Create .env from sample if it doesn't exist
 # ---------------------------------------------------------------------------
+echo ""
 info "Step 2/5: Checking .env file..."
 
 if [[ -f "$ENV_FILE" ]]; then
@@ -173,6 +335,7 @@ fi
 # ---------------------------------------------------------------------------
 # Step 3: Detect I2C group ID
 # ---------------------------------------------------------------------------
+echo ""
 info "Step 3/5: Detecting I2C group ID..."
 
 I2C_GID=""
@@ -207,6 +370,7 @@ fi
 # ---------------------------------------------------------------------------
 # Step 4: Detect GPIO group ID
 # ---------------------------------------------------------------------------
+echo ""
 info "Step 4/5: Detecting GPIO group ID..."
 
 GPIO_GID=""
@@ -246,6 +410,7 @@ fi
 # ---------------------------------------------------------------------------
 # Write GIDs into .env
 # ---------------------------------------------------------------------------
+echo ""
 info "Writing detected GIDs to .env..."
 
 # Replace existing values or append if not present
@@ -266,6 +431,7 @@ ok "I2C_GID=$I2C_GID and GPIO_GID=$GPIO_GID written to .env"
 # ---------------------------------------------------------------------------
 # Step 5: Validate hardware devices
 # ---------------------------------------------------------------------------
+echo ""
 info "Step 5/5: Checking hardware devices..."
 
 ALL_OK=true
@@ -298,7 +464,7 @@ echo ""
 echo "═══════════════════════════════════════════════════════════════════"
 
 if [[ "$ALL_OK" == true ]]; then
-    ok "Setup complete! Hardware devices detected."
+    ok "Setup complete! All checks passed."
 else
     warn "Setup complete with warnings. Review the messages above."
 fi
@@ -306,8 +472,8 @@ fi
 echo ""
 echo "  Next steps:"
 echo "    1. Edit .env and set secure passwords:"
-echo "       - MARIADB_ROOT_PASSWORD"
-echo "       - LIGHTNING_DB_PASSWORD"
+echo "       nano $ENV_FILE"
+echo "       (change MARIADB_ROOT_PASSWORD and LIGHTNING_DB_PASSWORD)"
 echo ""
 echo "    2. Start the stack:"
 echo "       docker compose up -d"
