@@ -131,18 +131,19 @@ db_wizard() {
     pass=$(prompt_secret "Database password for user '$user'")
   fi
 
-  # Persist env
+  # Persist env (systemd-safe quoting: escape %, \ and ")
   step "Writing service environment file"
   sudo mkdir -p "$(dirname "$ENV_FILE")"
+  _sdq() { local s="$1"; s="${s//%/%%}"; s="${s//\\/\\\\}"; s="${s//\"/\\\"}"; printf '%s' "$s"; }
   TMP_ENV=$(mktemp)
-  cat > "$TMP_ENV" <<EOF
-LIGHTNING_DB_HOST=$host
-LIGHTNING_DB_PORT=$port
-LIGHTNING_DB_USER=$user
-LIGHTNING_DB_PASSWORD=$pass
-LIGHTNING_DB_NAME=$db
-LIGHTNING_CSV_FILE_PATH=/var/lib/lightning/events.csv
-EOF
+  {
+    printf 'LIGHTNING_DB_HOST="%s"\n' "$(_sdq "$host")"
+    printf 'LIGHTNING_DB_PORT=%s\n' "$port"
+    printf 'LIGHTNING_DB_USER="%s"\n' "$(_sdq "$user")"
+    printf 'LIGHTNING_DB_PASSWORD="%s"\n' "$(_sdq "$pass")"
+    printf 'LIGHTNING_DB_NAME="%s"\n' "$(_sdq "$db")"
+    printf 'LIGHTNING_CSV_FILE_PATH="%s"\n' "/var/lib/lightning/events.csv"
+  } > "$TMP_ENV"
   sudo mv "$TMP_ENV" "$ENV_FILE"
   sudo chmod 640 "$ENV_FILE"
 
@@ -460,12 +461,12 @@ if [[ $INSTALL_SERVICES -eq 1 ]]; then
     cat > "$TMP_ENV" <<EOF
 # Lightning services environment
 # Edit these values to match your MariaDB and file locations.
-LIGHTNING_DB_HOST=localhost
+LIGHTNING_DB_HOST="127.0.0.1"
 LIGHTNING_DB_PORT=3306
-LIGHTNING_DB_USER=lightning
-LIGHTNING_DB_PASSWORD=changeme
-LIGHTNING_DB_NAME=lightning
-LIGHTNING_CSV_FILE_PATH=/var/lib/lightning/events.csv
+LIGHTNING_DB_USER="lightning"
+LIGHTNING_DB_PASSWORD="changeme"
+LIGHTNING_DB_NAME="lightning"
+LIGHTNING_CSV_FILE_PATH="/var/lib/lightning/events.csv"
 
 # Pin factory for gpiozero (pigpio recommended if installed)
 GPIOZERO_PIN_FACTORY=${PIN_FACTORY}
