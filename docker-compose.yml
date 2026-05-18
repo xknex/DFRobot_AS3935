@@ -1,20 +1,33 @@
 # =============================================================================
-# Lightning Data Pipeline — Docker Compose
+# Lightning Data Pipeline — Docker Compose (Full Stack)
 # =============================================================================
+# All components containerized:
+#   1. MariaDB       — Event storage
+#   2. db-init       — One-shot schema initialization
+#   3. lightning-api  — REST API for querying events
+#   4. lightning-collector — Sensor daemon (requires Raspberry Pi hardware)
+#
 # First-deployment behavior:
-#   1. MariaDB starts and creates the database + user from MARIADB_* env vars
-#   2. db-init container waits for MariaDB, creates the schema, then exits
-#   3. lightning-api container waits for db-init, validates env, then starts
+#   - MariaDB creates the database + user from MARIADB_* env vars
+#   - db-init waits for MariaDB, creates the events table, then exits
+#   - API and Collector wait for db-init, validate their environment, then start
 #
-# All configuration is driven by the .env file. Copy .env.sample → .env and
-# fill in your values before running: docker compose up -d
+# HARDWARE REQUIREMENT (collector only):
+#   The collector container needs direct access to the Raspberry Pi's I2C bus
+#   and GPIO pins. This compose file passes through /dev/i2c-1, /dev/gpiochip0,
+#   and /dev/gpiomem. It will ONLY work on a Raspberry Pi (or compatible SBC)
+#   with I2C enabled and the AS3935 sensor wired to the GPIO header.
 #
-# The lightning-collector service is NOT included here because it requires
-# direct I2C/GPIO access to the AS3935 sensor on a Raspberry Pi. Run it
-# natively on the Pi host, pointing LIGHTNING_DB_HOST at this MariaDB instance.
+# Usage:
+#   cp .env.sample .env   # Edit with your values
+#   docker compose up -d
+#   docker compose logs -f
 # =============================================================================
 
 services:
+  # ---------------------------------------------------------------------------
+  # MariaDB — Event database
+  # ---------------------------------------------------------------------------
   mariadb:
     image: mariadb:11
     restart: unless-stopped
@@ -37,6 +50,9 @@ services:
       retries: 5
       start_period: 30s
 
+  # ---------------------------------------------------------------------------
+  # DB Init — One-shot schema setup (runs once, then exits)
+  # ---------------------------------------------------------------------------
   db-init:
     build: .
     env_file: .env
@@ -48,6 +64,9 @@ services:
       - lightning-net
     restart: "no"
 
+  # ---------------------------------------------------------------------------
+  # Lightning REST API — Serves event data over HTTP
+  # ---------------------------------------------------------------------------
   lightning-api:
     build: .
     env_file: .env
@@ -61,8 +80,51 @@ services:
       - lightning-net
     restart: unless-stopped
 
+  # ---------------------------------------------------------------------------
+  # Lightning Collector — Sensor daemon (Raspberry Pi only)
+  # ---------------------------------------------------------------------------
+  # This service requires physical hardware access. It passes through the
+  # I2C bus and GPIO character devices from the host into the container.
+  #
+  # Prerequisites on the host Raspberry Pi:
+  #   - I2C enabled: sudo raspi-config → Interface Options → I2C
+  #   - Kernel modules loaded: i2c-dev, i2c-bcm2835
+  #   - AS3935 sensor wired to I2C1 (SDA=BCM2, SCL=BCM3) + IRQ on BCM4
+  #   - User in i2c/gpio groups or devices world-readable
+  #
+  # If you're NOT running on a Pi (e.g., developing on x86), comment out
+  # or remove this entire service block.
+  # ---------------------------------------------------------------------------
+  lightning-collector:
+    build: .
+    env_file: .env
+    command: ["collector"]
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+    devices:
+      # I2C bus — required for sensor communication
+      - "/dev/i2c-${LIGHTNING_SENSOR_I2C_BUS:-1}:/dev/i2c-${LIGHTNING_SENSOR_I2C_BUS:-1}"
+      # GPIO character device — required for interrupt edge detection (gpiozero/lgpio)
+      - "/dev/gpiochip0:/dev/gpiochip0"
+      # GPIO memory device — fallback for some pin factories
+      - "/dev/gpiomem:/dev/gpiomem"
+    # Map host group IDs for device access without running as root
+    group_add:
+      - "${I2C_GID:-998}"
+      - "${GPIO_GID:-997}"
+    volumes:
+      - lightning_csv:/var/lib/lightning
+    networks:
+      - lightning-net
+    restart: unless-stopped
+    # Disable the HTTP healthcheck (collector has no HTTP endpoint)
+    healthcheck:
+      disable: true
+
 volumes:
   mariadb_data:
+  lightning_csv:
 
 networks:
   lightning-net:

@@ -4,10 +4,12 @@ Performs first-deployment initialization:
 1. Validates all required environment variables with clear error messages
 2. Waits for MariaDB to become reachable (with retries)
 3. Ensures the database schema exists (creates tables if missing)
-4. Starts the requested service (API or db-init one-shot)
+4. (Collector only) Validates hardware device access (I2C, GPIO)
+5. Starts the requested service (API, Collector, or db-init one-shot)
 
 Usage:
     python docker/entrypoint.py api          # Start the REST API
+    python docker/entrypoint.py collector    # Start the Lightning Collector
     python docker/entrypoint.py db-init      # Run schema init and exit
 """
 
@@ -37,7 +39,7 @@ REQUIRED_DB_VARS = {
     "LIGHTNING_DB_NAME": "MariaDB database name (e.g., 'lightning_events')",
 }
 
-# Additional variables required for the API service
+# Additional variables shown for the API service
 OPTIONAL_API_VARS = {
     "LIGHTNING_API_HOST": ("API bind address", "0.0.0.0"),
     "LIGHTNING_API_PORT": ("API listen port", "8000"),
@@ -45,9 +47,21 @@ OPTIONAL_API_VARS = {
     "LIGHTNING_DB_POOL_SIZE": ("Connection pool size", "5"),
 }
 
+# Additional variables shown for the Collector service
+OPTIONAL_COLLECTOR_VARS = {
+    "LIGHTNING_CSV_FILE_PATH": ("CSV backup file path", "/var/lib/lightning/events.csv"),
+    "LIGHTNING_SENSOR_I2C_ADDRESS": ("I2C address (1, 2, or 3 = 0x01, 0x02, 0x03)", "3"),
+    "LIGHTNING_SENSOR_I2C_BUS": ("I2C bus number", "1"),
+    "LIGHTNING_SENSOR_IRQ_PIN": ("BCM GPIO pin for IRQ", "4"),
+    "LIGHTNING_BUFFER_MAX_SIZE": ("Max write buffer size", "10000"),
+}
+
 # Retry configuration for database connectivity
 DB_MAX_RETRIES = 30
 DB_RETRY_INTERVAL_S = 2
+
+# Valid modes
+VALID_MODES = ("api", "collector", "db-init")
 
 
 # ---------------------------------------------------------------------------
@@ -66,7 +80,7 @@ def validate_environment(mode: str) -> dict[str, str]:
     logger.info("=" * 70)
     logger.info("Mode: %s", mode)
     logger.info("-" * 70)
-    logger.info("Step 1/3: Validating environment variables...")
+    logger.info("Step 1/4: Validating environment variables...")
 
     missing: list[tuple[str, str]] = []
     values: dict[str, str] = {}
@@ -111,24 +125,145 @@ def validate_environment(mode: str) -> dict[str, str]:
             val = os.environ.get(var, default)
             logger.info("  %-24s = %s", var, val)
 
+    if mode == "collector":
+        logger.info("")
+        logger.info("  Collector settings (defaults shown if not set):")
+        for var, (desc, default) in OPTIONAL_COLLECTOR_VARS.items():
+            val = os.environ.get(var, default)
+            logger.info("  %-30s = %s", var, val)
+
     logger.info("")
     logger.info("  ✓ All required environment variables are set")
     return values
 
 
 # ---------------------------------------------------------------------------
-# Step 2: Wait for MariaDB to be reachable
+# Step 2: Validate hardware device access (Collector only)
 # ---------------------------------------------------------------------------
 
 
-def wait_for_database(values: dict[str, str]) -> None:
+def validate_hardware_devices() -> None:
+    """Check that required hardware devices are accessible inside the container.
+
+    Verifies:
+    - /dev/i2c-{bus} exists and is readable/writable
+    - /dev/gpiochip0 (or /dev/gpiomem) exists for GPIO edge detection
+
+    Exits with code 1 and clear instructions if devices are missing.
+    """
+    logger.info("-" * 70)
+    logger.info("Step 2/4: Validating hardware device access...")
+
+    i2c_bus = os.environ.get("LIGHTNING_SENSOR_I2C_BUS", "1")
+    i2c_device = f"/dev/i2c-{i2c_bus}"
+
+    errors: list[tuple[str, str, list[str]]] = []
+
+    # Check I2C device
+    if not os.path.exists(i2c_device):
+        errors.append((
+            f"I2C device '{i2c_device}' not found",
+            "The I2C bus device is not passed through to the container.",
+            [
+                f"Ensure 'devices: [\"{i2c_device}:{i2c_device}\"]' is in docker-compose.yml",
+                "Ensure I2C is enabled on the host: sudo raspi-config → Interface Options → I2C",
+                "Ensure the i2c-dev kernel module is loaded: sudo modprobe i2c-dev",
+                f"Verify the device exists on the host: ls -la {i2c_device}",
+            ],
+        ))
+    elif not os.access(i2c_device, os.R_OK | os.W_OK):
+        errors.append((
+            f"I2C device '{i2c_device}' exists but is not readable/writable",
+            "The container user lacks permissions to access the I2C bus.",
+            [
+                "Add the 'i2c' group to the container: group_add: [\"i2c\"]",
+                "Or run the collector container with: privileged: true",
+                f"Check host permissions: ls -la {i2c_device}",
+            ],
+        ))
+
+    # Check GPIO device (gpiochip0 for lgpio/gpiozero, or gpiomem for legacy)
+    gpio_chip = "/dev/gpiochip0"
+    gpio_mem = "/dev/gpiomem"
+
+    has_gpio_chip = os.path.exists(gpio_chip)
+    has_gpio_mem = os.path.exists(gpio_mem)
+
+    if not has_gpio_chip and not has_gpio_mem:
+        errors.append((
+            "GPIO device not found (checked /dev/gpiochip0 and /dev/gpiomem)",
+            "No GPIO character device is passed through to the container.",
+            [
+                "Add GPIO devices to docker-compose.yml:",
+                f"  devices:",
+                f"    - /dev/gpiochip0:/dev/gpiochip0",
+                f"    - /dev/gpiomem:/dev/gpiomem",
+                "Or run the collector container with: privileged: true",
+                "Verify devices exist on the host: ls -la /dev/gpio*",
+            ],
+        ))
+    else:
+        # Check permissions on whichever exists
+        gpio_device = gpio_chip if has_gpio_chip else gpio_mem
+        if not os.access(gpio_device, os.R_OK | os.W_OK):
+            errors.append((
+                f"GPIO device '{gpio_device}' exists but is not readable/writable",
+                "The container user lacks permissions to access GPIO.",
+                [
+                    "Add the 'gpio' group to the container: group_add: [\"gpio\"]",
+                    "Or run the collector container with: privileged: true",
+                    f"Check host permissions: ls -la {gpio_device}",
+                ],
+            ))
+
+    if errors:
+        logger.error("")
+        logger.error("╔══════════════════════════════════════════════════════════════════╗")
+        logger.error("║  HARDWARE DEVICE ACCESS FAILED                                  ║")
+        logger.error("╠══════════════════════════════════════════════════════════════════╣")
+        for problem, explanation, fixes in errors:
+            logger.error("║")
+            logger.error("║  ✗ %s", problem)
+            logger.error("║    %s", explanation)
+            logger.error("║")
+            logger.error("║    HOW TO FIX:")
+            for fix in fixes:
+                logger.error("║      %s", fix)
+        logger.error("║")
+        logger.error("╠══════════════════════════════════════════════════════════════════╣")
+        logger.error("║  IMPORTANT: The collector requires physical access to the       ║")
+        logger.error("║  Raspberry Pi's I2C bus and GPIO pins. The Docker container     ║")
+        logger.error("║  must run on the Pi with device passthrough configured.         ║")
+        logger.error("║                                                                 ║")
+        logger.error("║  Minimal docker-compose.yml for the collector:                  ║")
+        logger.error("║    lightning-collector:                                          ║")
+        logger.error("║      devices:                                                   ║")
+        logger.error("║        - /dev/i2c-1:/dev/i2c-1                                  ║")
+        logger.error("║        - /dev/gpiochip0:/dev/gpiochip0                          ║")
+        logger.error("║        - /dev/gpiomem:/dev/gpiomem                              ║")
+        logger.error("║      group_add: [\"i2c\", \"gpio\"]                                 ║")
+        logger.error("╚══════════════════════════════════════════════════════════════════╝")
+        sys.exit(1)
+
+    logger.info("  ✓ I2C device: %s (accessible)", i2c_device)
+    gpio_found = gpio_chip if has_gpio_chip else gpio_mem
+    logger.info("  ✓ GPIO device: %s (accessible)", gpio_found)
+    logger.info("")
+
+
+# ---------------------------------------------------------------------------
+# Step 3: Wait for MariaDB to be reachable
+# ---------------------------------------------------------------------------
+
+
+def wait_for_database(values: dict[str, str], step_num: int = 3) -> None:
     """Wait for MariaDB to accept connections, with retries.
 
     Exits with code 1 and clear instructions if the database is unreachable
     after all retries are exhausted.
     """
     logger.info("-" * 70)
-    logger.info("Step 2/3: Waiting for MariaDB to be reachable...")
+    logger.info("Step %d/4: Waiting for MariaDB to be reachable...", step_num)
     logger.info(
         "  Target: %s:%s (database: %s, user: %s)",
         values["LIGHTNING_DB_HOST"],
@@ -241,17 +376,17 @@ def wait_for_database(values: dict[str, str]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Step 3: Ensure database schema exists
+# Step 4: Ensure database schema exists
 # ---------------------------------------------------------------------------
 
 
-def ensure_schema(values: dict[str, str]) -> None:
+def ensure_schema(values: dict[str, str], step_num: int = 4) -> None:
     """Create the events table and indexes if they don't exist.
 
     Exits with code 1 and clear instructions on failure.
     """
     logger.info("-" * 70)
-    logger.info("Step 3/3: Ensuring database schema exists...")
+    logger.info("Step %d/4: Ensuring database schema exists...", step_num)
 
     import mariadb
 
@@ -331,7 +466,7 @@ def ensure_schema(values: dict[str, str]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Step 4: Start the requested service
+# Step 5: Start the requested service
 # ---------------------------------------------------------------------------
 
 
@@ -347,27 +482,109 @@ def start_api() -> None:
     )
 
 
+def start_collector() -> None:
+    """Start the Lightning Collector daemon."""
+    logger.info("Starting Lightning Collector service...")
+    logger.info("")
+
+    # Replace the current process with the collector
+    os.execvp(
+        sys.executable,
+        [sys.executable, "-m", "lightning_collector"],
+    )
+
+
+# ---------------------------------------------------------------------------
+# CSV directory setup
+# ---------------------------------------------------------------------------
+
+
+def ensure_csv_directory() -> None:
+    """Ensure the CSV output directory exists and is writable."""
+    csv_path = os.environ.get("LIGHTNING_CSV_FILE_PATH", "/var/lib/lightning/events.csv")
+    csv_dir = os.path.dirname(csv_path)
+
+    if not csv_dir:
+        return
+
+    if not os.path.isdir(csv_dir):
+        try:
+            os.makedirs(csv_dir, exist_ok=True)
+            logger.info("  ✓ Created CSV directory: %s", csv_dir)
+        except OSError as exc:
+            logger.error("")
+            logger.error("╔══════════════════════════════════════════════════════════════════╗")
+            logger.error("║  CSV DIRECTORY CREATION FAILED                                  ║")
+            logger.error("╠══════════════════════════════════════════════════════════════════╣")
+            logger.error("║  Cannot create directory: %s", csv_dir)
+            logger.error("║  Error: %s", exc)
+            logger.error("║")
+            logger.error("║  HOW TO FIX:")
+            logger.error("║  Add a volume mount in docker-compose.yml:")
+            logger.error("║    volumes:")
+            logger.error("║      - lightning_csv:/var/lib/lightning")
+            logger.error("║  Or set LIGHTNING_CSV_FILE_PATH to a writable location.")
+            logger.error("╚══════════════════════════════════════════════════════════════════╝")
+            sys.exit(1)
+    elif not os.access(csv_dir, os.W_OK):
+        logger.error("")
+        logger.error("╔══════════════════════════════════════════════════════════════════╗")
+        logger.error("║  CSV DIRECTORY NOT WRITABLE                                     ║")
+        logger.error("╠══════════════════════════════════════════════════════════════════╣")
+        logger.error("║  Directory exists but is not writable: %s", csv_dir)
+        logger.error("║")
+        logger.error("║  HOW TO FIX:")
+        logger.error("║  Ensure the volume is mounted with correct ownership:")
+        logger.error("║    volumes:")
+        logger.error("║      - lightning_csv:/var/lib/lightning")
+        logger.error("║  Or change LIGHTNING_CSV_FILE_PATH to a writable path.")
+        logger.error("╚══════════════════════════════════════════════════════════════════╝")
+        sys.exit(1)
+    else:
+        logger.info("  ✓ CSV directory writable: %s", csv_dir)
+
+
+# ---------------------------------------------------------------------------
+# Main dispatcher
+# ---------------------------------------------------------------------------
+
+
 def main() -> None:
     """Entrypoint dispatcher."""
     if len(sys.argv) < 2:
         print(
             "Usage: python docker/entrypoint.py <mode>\n"
             "  Modes:\n"
-            "    api      — Run initialization then start the REST API\n"
-            "    db-init  — Run initialization only (schema setup) then exit\n"
+            "    api        — Run initialization then start the REST API\n"
+            "    collector  — Run initialization then start the Collector daemon\n"
+            "    db-init    — Run initialization only (schema setup) then exit\n"
         )
         sys.exit(1)
 
     mode = sys.argv[1].lower().strip()
 
-    if mode not in ("api", "db-init"):
-        logger.error("Unknown mode: '%s'. Use 'api' or 'db-init'.", mode)
+    if mode not in VALID_MODES:
+        logger.error(
+            "Unknown mode: '%s'. Valid modes: %s",
+            mode,
+            ", ".join(VALID_MODES),
+        )
         sys.exit(1)
 
-    # Run initialization steps
+    # Step 1: Validate environment
     values = validate_environment(mode)
-    wait_for_database(values)
-    ensure_schema(values)
+
+    # Step 2: Hardware validation (collector only)
+    if mode == "collector":
+        validate_hardware_devices()
+        ensure_csv_directory()
+        # Steps 3 & 4 use adjusted numbering for collector
+        wait_for_database(values, step_num=3)
+        ensure_schema(values, step_num=4)
+    else:
+        # For api/db-init, skip hardware check (steps 2/3 become 3/4 visually)
+        wait_for_database(values, step_num=2)
+        ensure_schema(values, step_num=3)
 
     # Dispatch based on mode
     if mode == "db-init":
@@ -375,6 +592,8 @@ def main() -> None:
         sys.exit(0)
     elif mode == "api":
         start_api()
+    elif mode == "collector":
+        start_collector()
 
 
 if __name__ == "__main__":
