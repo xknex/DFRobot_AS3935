@@ -71,6 +71,7 @@ BUS="1"
 IRQ="4"
 INSTALL_SERVICES=0
 SERVICE_USER="lightning"
+SERVICE_USER_EXPLICIT=0
 ENV_FILE="/etc/lightning/environment"
 WORKDIR="/opt/lightning"
 
@@ -91,7 +92,7 @@ while [[ $# -gt 0 ]]; do
     --bus) BUS="$2"; shift 2 ;;
     --irq) IRQ="$2"; shift 2 ;;
     --install-services) INSTALL_SERVICES=1; shift ;;
-    --service-user) SERVICE_USER="$2"; shift 2 ;;
+    --service-user) SERVICE_USER="$2"; SERVICE_USER_EXPLICIT=1; shift 2 ;;
     --env-file) ENV_FILE="$2"; shift 2 ;;
     --workdir) WORKDIR="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
@@ -278,6 +279,17 @@ EOF
   VENV_PY="$VENV_PATH/bin/python"
   if [[ ! -x "$VENV_PY" ]]; then
     echo "Venv python not found at $VENV_PY" >&2; exit 1
+  fi
+
+  # Ensure selected service user can execute the venv python. Common failure:
+  # dedicated user cannot traverse /home/<user>/... venv paths.
+  if ! sudo -u "$SERVICE_USER" test -x "$VENV_PY" >/dev/null 2>&1; then
+    if [[ $SERVICE_USER_EXPLICIT -eq 1 ]]; then
+      die "Service user '$SERVICE_USER' cannot execute '$VENV_PY'. Use --service-user '$USER' or set --venv-path to a location accessible by '$SERVICE_USER' (e.g. /opt/lightning/.venv)."
+    else
+      warn "Service user '$SERVICE_USER' cannot execute '$VENV_PY'; switching service user to '$USER' for compatibility."
+      SERVICE_USER="$USER"
+    fi
   fi
 
   # Generate unit files with explicit venv python and pigpio dependency if selected
