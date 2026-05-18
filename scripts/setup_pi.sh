@@ -22,6 +22,7 @@
 #   --service-user NAME                   System user to run services (default: lightning)
 #   --env-file PATH                       Environment file for services (default: /etc/lightning/environment)
 #   --workdir PATH                        Working directory for services (default: /opt/lightning)
+#   --db-wizard                           Interactive database setup (local or remote)
 #   -h, --help                            Show help
 set -euo pipefail
 
@@ -59,6 +60,131 @@ run_tests() {
   fi
 }
 
+# Prompt helper with default
+prompt() {
+  local msg="$1"; shift
+  local def="$1"; shift || true
+  local var
+  read -r -p "$msg [${def}]: " var || true
+  if [[ -z "$var" ]]; then echo "$def"; else echo "$var"; fi
+}
+
+prompt_secret() {
+  local msg="$1"; local val
+  read -r -s -p "$msg: " val; echo; echo "$val"
+}
+
+db_wizard() {
+  step "Database setup wizard"
+
+  # Ask local or remote
+  local mode
+  while true; do
+    mode=$(prompt "Setup database on this Pi (local) or use remote host? (local/remote)" "local")
+    [[ "$mode" == "local" || "$mode" == "remote" ]] && break
+    warn "Please enter 'local' or 'remote'"
+  done
+
+  local host port db user pass
+  if [[ "$mode" == "local" ]]; then
+    host=$(prompt "DB host" "127.0.0.1")
+    port=$(prompt "DB port" "3306")
+    db=$(prompt "Database name" "lightning")
+    user=$(prompt "Database user" "lightning")
+    pass=$(prompt_secret "Database password for user '$user'")
+
+    if [[ $DO_APT -eq 1 ]]; then
+      step "Installing MariaDB server and client (local)"
+      if ! sudo apt-get install -y mariadb-server mariadb-client libmariadb-dev; then
+        warn "apt install mariadb-server failed; continuing"
+      fi
+      sudo systemctl enable --now mariadb || true
+    fi
+
+    step "Creating database and user via root socket auth"
+    sudo mysql -u root <<SQL || die "Failed to create database/user via mysql root"
+CREATE DATABASE IF NOT EXISTS \`$db\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS '$user'@'localhost' IDENTIFIED BY '$pass';
+CREATE USER IF NOT EXISTS '$user'@'127.0.0.1' IDENTIFIED BY '$pass';
+GRANT ALL PRIVILEGES ON \`$db\`.* TO '$user'@'localhost';
+GRANT ALL PRIVILEGES ON \`$db\`.* TO '$user'@'127.0.0.1';
+FLUSH PRIVILEGES;
+SQL
+
+  else
+    host=$(prompt "DB host (remote)" "db.example.local")
+    port=$(prompt "DB port" "3306")
+    db=$(prompt "Database name" "lightning")
+    user=$(prompt "Database user (must exist or have create privileges)" "lightning")
+    pass=$(prompt_secret "Database password for user '$user'")
+  fi
+
+  # Persist env
+  step "Writing service environment file"
+  sudo mkdir -p "$(dirname "$ENV_FILE")"
+  TMP_ENV=$(mktemp)
+  cat > "$TMP_ENV" <<EOF
+LIGHTNING_DB_HOST=$host
+LIGHTNING_DB_PORT=$port
+LIGHTNING_DB_USER=$user
+LIGHTNING_DB_PASSWORD=$pass
+LIGHTNING_DB_NAME=$db
+LIGHTNING_CSV_FILE_PATH=/var/lib/lightning/events.csv
+EOF
+  sudo mv "$TMP_ENV" "$ENV_FILE"
+  sudo chmod 640 "$ENV_FILE"
+
+  # Initialize schema using project helper
+  step "Initializing database schema (events table)"
+  python - <<PY || die "Schema initialization failed"
+import os
+import sys
+from lightning_common.db import get_connection, create_tables_if_not_exist
+
+host=os.environ.get('LIGHTNING_DB_HOST','127.0.0.1')
+port=int(os.environ.get('LIGHTNING_DB_PORT','3306'))
+user=os.environ.get('LIGHTNING_DB_USER','lightning')
+pwd=os.environ.get('LIGHTNING_DB_PASSWORD','changeme')
+db=os.environ.get('LIGHTNING_DB_NAME','lightning')
+
+try:
+    conn=get_connection(host=host,port=port,user=user,password=pwd,database=db)
+    create_tables_if_not_exist(conn)
+    cur=conn.cursor(); cur.execute('SELECT COUNT(*) FROM events'); cur.fetchone(); cur.close()
+    conn.close()
+    print('DB OK: schema ensured and reachable')
+except Exception as e:
+    print('DB ERROR:', e)
+    sys.exit(1)
+PY
+
+  step "Verifying connectivity with service env"
+  export LIGHTNING_DB_HOST="$host"
+  export LIGHTNING_DB_PORT="$port"
+  export LIGHTNING_DB_USER="$user"
+  export LIGHTNING_DB_PASSWORD="$pass"
+  export LIGHTNING_DB_NAME="$db"
+  python - <<PY || die "Connectivity check failed"
+import os, sys
+import mariadb
+try:
+    conn=mariadb.connect(
+        host=os.getenv('LIGHTNING_DB_HOST'),
+        port=int(os.getenv('LIGHTNING_DB_PORT','3306')),
+        user=os.getenv('LIGHTNING_DB_USER'),
+        password=os.getenv('LIGHTNING_DB_PASSWORD'),
+        database=os.getenv('LIGHTNING_DB_NAME'),
+    )
+    cur=conn.cursor(); cur.execute('SELECT 1'); cur.fetchone(); cur.close(); conn.close()
+    print('Connection OK')
+except Exception as e:
+    print('Connection ERROR:', e)
+    sys.exit(1)
+PY
+
+  printf "%s Database setup completed for %s@%s/%s\n" "$CHECK" "$user" "$host" "$db"
+}
+
 PIN_FACTORY="pigpio"
 VENV_PATH="${HOME}/.venvs/DFRobot_AS3935"
 DO_APT=1
@@ -74,6 +200,7 @@ SERVICE_USER="lightning"
 SERVICE_USER_EXPLICIT=0
 ENV_FILE="/etc/lightning/environment"
 WORKDIR="/opt/lightning"
+DB_WIZARD=0
 
 usage() {
   sed -n '1,40p' "$0" | sed 's/^# \{0,1\}//'
@@ -95,6 +222,7 @@ while [[ $# -gt 0 ]]; do
     --service-user) SERVICE_USER="$2"; SERVICE_USER_EXPLICIT=1; shift 2 ;;
     --env-file) ENV_FILE="$2"; shift 2 ;;
     --workdir) WORKDIR="$2"; shift 2 ;;
+    --db-wizard) DB_WIZARD=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage; exit 1 ;;
   esac
@@ -112,6 +240,7 @@ TOTAL=5
 [[ $RUN_TESTS -eq 1 ]] && TOTAL=$((TOTAL+1))
 [[ $RUN_HW -eq 1 ]] && TOTAL=$((TOTAL+1))
 [[ $INSTALL_SERVICES -eq 1 ]] && TOTAL=$((TOTAL+1))
+[[ $DB_WIZARD -eq 1 ]] && TOTAL=$((TOTAL+1))
 
 step "Verifying prerequisites"
 require_cmd python3
@@ -240,6 +369,10 @@ if [[ $RUN_HW -eq 1 ]]; then
   export AS3935_I2C_BUS="$BUS"
   export AS3935_IRQ_PIN="$IRQ"
   run_tests "Hardware tests" HW_SUMMARY -m hardware
+fi
+
+if [[ $DB_WIZARD -eq 1 ]]; then
+  db_wizard
 fi
 
 if [[ $INSTALL_SERVICES -eq 1 ]]; then
