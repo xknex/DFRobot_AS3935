@@ -500,12 +500,35 @@ EOF
     PIGPIO_DEPS=$'Wants=pigpiod.service\nAfter=pigpiod.service'
   fi
 
+  # One-shot DB apply unit to ensure schema before API/Collector start
+  TMP_DB=$(mktemp)
+  cat > "$TMP_DB" <<EOF
+[Unit]
+Description=Lightning DB Initialize (one-shot)
+$AFTER_NET
+$WANTS_NET
+
+[Service]
+Type=oneshot
+ExecStart=$VENV_PY -m lightning_common.cli_db_apply
+EnvironmentFile=$ENV_FILE
+WorkingDirectory=$WORKDIR
+User=$SERVICE_USER
+Group=$SERVICE_USER
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
   cat > "$TMP_API" <<EOF
 [Unit]
 Description=Lightning REST API Service
 $AFTER_NET
 $WANTS_NET
 $PIGPIO_DEPS
+Wants=lightning-db-apply.service
+After=lightning-db-apply.service
 
 [Service]
 Type=simple
@@ -527,6 +550,8 @@ Description=Lightning Data Collector Service
 $AFTER_NET
 $WANTS_NET
 $PIGPIO_DEPS
+Wants=lightning-db-apply.service
+After=lightning-db-apply.service
 
 [Service]
 Type=simple
@@ -542,11 +567,13 @@ Group=$SERVICE_USER
 WantedBy=multi-user.target
 EOF
 
+  sudo mv "$TMP_DB" "$UNIT_DIR/lightning-db-apply.service"
   sudo mv "$TMP_API" "$UNIT_DIR/lightning-api.service"
   sudo mv "$TMP_COL" "$UNIT_DIR/lightning-collector.service"
-  sudo chmod 644 "$UNIT_DIR/lightning-api.service" "$UNIT_DIR/lightning-collector.service"
+  sudo chmod 644 "$UNIT_DIR/lightning-db-apply.service" "$UNIT_DIR/lightning-api.service" "$UNIT_DIR/lightning-collector.service"
 
   sudo systemctl daemon-reload
+  sudo systemctl enable --now lightning-db-apply.service || true
   sudo systemctl enable --now lightning-collector.service || true
   sudo systemctl enable --now lightning-api.service || true
 
