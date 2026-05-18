@@ -164,7 +164,7 @@ pip install -e ".[test]"
 python -m pytest tests/ -v
 ```
 
-The test suite (364 tests) runs without hardware using mocked I2C and GPIO. Includes property-based tests via Hypothesis covering the sensor driver, collector components, configuration, and REST API.
+The test suite (365 tests) runs without hardware using mocked I2C and GPIO. Includes property-based tests via Hypothesis covering the sensor driver, collector components, configuration, and REST API.
 
 ### One-command Pi setup
 
@@ -270,7 +270,7 @@ This is a complete rewrite of the original DFRobot library. Key changes:
 - **Bug fixes**: Corrected LCO bit (0x80), clear_statistics sequence, energy calculation
 - **Type hints**: Full annotations for IDE support
 - **Logging**: Structured logging via Python `logging` module (no print statements)
-- **Testing**: 364 tests including property-based tests (Hypothesis)
+- **Testing**: 365 tests including property-based tests (Hypothesis)
 - **Pin numbering**: BCM (gpiozero) instead of BOARD (RPi.GPIO)
 
 The legacy code remains available in `python/raspberrypi/` for reference.
@@ -396,6 +396,7 @@ sudo journalctl -u lightning-collector -f
 sudo journalctl -u lightning-api -f
 ```
 
+
 ### API Endpoints
 
 The REST API runs on port 8000 by default.
@@ -410,22 +411,6 @@ The REST API runs on port 8000 by default.
 #### GET /events
 
 Query parameters:
-
-### Quick API Check
-
-After installing services or running the API locally, verify it responds:
-
-```bash
-curl -sS http://127.0.0.1:8000/health | jq
-curl -sS "http://127.0.0.1:8000/events?page=1&page_size=5" | jq
-```
-
-Tips:
-- Prefer `127.0.0.1` to force TCP. Using `localhost` may try a Unix socket and fail if the DB isn’t local.
-- If health is `degraded`, ensure DB settings in `/etc/lightning/environment` are correct, then:
-```bash
-sudo systemctl restart lightning-db-apply lightning-api
-```
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -452,6 +437,22 @@ Returns summary statistics:
 #### GET /health
 
 Returns service status, database connectivity, and uptime. Returns HTTP 200 with `"healthy"` when the database is connected, or HTTP 503 with `"degraded"` when the database is unavailable.
+
+### Quick API Check
+
+After installing services or running the API locally, verify it responds:
+
+```bash
+curl -sS http://127.0.0.1:8000/health | jq
+curl -sS "http://127.0.0.1:8000/events?page=1&page_size=5" | jq
+```
+
+Tips:
+- Prefer `127.0.0.1` to force TCP. Using `localhost` may try a Unix socket and fail if the DB isn't local.
+- If health is `degraded`, ensure DB settings in `/etc/lightning/environment` are correct, then:
+```bash
+sudo systemctl restart lightning-db-apply lightning-api
+```
 
 ### Write Buffer (Network Resilience)
 
