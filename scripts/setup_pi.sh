@@ -23,6 +23,7 @@
 #   --env-file PATH                       Environment file for services (default: /etc/lightning/environment)
 #   --workdir PATH                        Working directory for services (default: /opt/lightning)
 #   --db-wizard                           Interactive database setup (local or remote)
+#   --db-apply                            Non-interactive: read env file, init schema, verify connectivity
 #   -h, --help                            Show help
 set -euo pipefail
 
@@ -196,6 +197,51 @@ PY
   printf "%s Database setup completed for %s@%s/%s\n" "$CHECK" "$user" "$host" "$db"
 }
 
+db_apply() {
+  step "Applying DB schema and verifying connectivity from env file"
+  if [[ ! -f "$ENV_FILE" ]]; then
+    die "Env file not found: $ENV_FILE (use --db-wizard first or create it)"
+  fi
+
+  # shellcheck disable=SC2046
+  set -a
+  # Only export lines that look like KEY=VAL without spaces and not comments
+  while IFS= read -r line; do
+    [[ -z "$line" || "$line" =~ ^# ]] && continue
+    if [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
+      eval "$line"
+    fi
+  done < "$ENV_FILE"
+  set +a
+
+  : "${LIGHTNING_DB_HOST:?missing}"
+  : "${LIGHTNING_DB_PORT:?missing}"
+  : "${LIGHTNING_DB_USER:?missing}"
+  : "${LIGHTNING_DB_PASSWORD:?missing}"
+  : "${LIGHTNING_DB_NAME:?missing}"
+
+  python - <<'PY' || die "DB apply failed"
+import os, sys
+from lightning_common.db import get_connection, create_tables_if_not_exist
+
+host=os.getenv('LIGHTNING_DB_HOST')
+port=int(os.getenv('LIGHTNING_DB_PORT','3306'))
+user=os.getenv('LIGHTNING_DB_USER')
+pwd=os.getenv('LIGHTNING_DB_PASSWORD')
+db=os.getenv('LIGHTNING_DB_NAME')
+
+try:
+    conn=get_connection(host=host,port=port,user=user,password=pwd,database=db)
+    create_tables_if_not_exist(conn)
+    cur=conn.cursor(); cur.execute('SELECT COUNT(*) FROM events'); count=cur.fetchone()[0]; cur.close()
+    conn.close()
+    print(f"DB OK: schema ensured and reachable; events rows={count}")
+except Exception as e:
+    print('DB ERROR:', e)
+    sys.exit(1)
+PY
+}
+
 PIN_FACTORY="pigpio"
 VENV_PATH="${HOME}/.venvs/DFRobot_AS3935"
 DO_APT=1
@@ -212,6 +258,7 @@ SERVICE_USER_EXPLICIT=0
 ENV_FILE="/etc/lightning/environment"
 WORKDIR="/opt/lightning"
 DB_WIZARD=0
+DB_APPLY=0
 
 usage() {
   sed -n '1,40p' "$0" | sed 's/^# \{0,1\}//'
@@ -234,6 +281,7 @@ while [[ $# -gt 0 ]]; do
     --env-file) ENV_FILE="$2"; shift 2 ;;
     --workdir) WORKDIR="$2"; shift 2 ;;
     --db-wizard) DB_WIZARD=1; shift ;;
+    --db-apply) DB_APPLY=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage; exit 1 ;;
   esac
@@ -252,6 +300,7 @@ TOTAL=5
 [[ $RUN_HW -eq 1 ]] && TOTAL=$((TOTAL+1))
 [[ $INSTALL_SERVICES -eq 1 ]] && TOTAL=$((TOTAL+1))
 [[ $DB_WIZARD -eq 1 ]] && TOTAL=$((TOTAL+1))
+[[ $DB_APPLY -eq 1 ]] && TOTAL=$((TOTAL+1))
 
 step "Verifying prerequisites"
 require_cmd python3
@@ -384,6 +433,10 @@ fi
 
 if [[ $DB_WIZARD -eq 1 ]]; then
   db_wizard
+fi
+
+if [[ $DB_APPLY -eq 1 ]]; then
+  db_apply
 fi
 
 if [[ $INSTALL_SERVICES -eq 1 ]]; then
