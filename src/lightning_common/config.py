@@ -43,6 +43,10 @@ class CollectorSettings(BaseSettings):
         le=1.0,
         description="Minimum normalized energy for nearby lightning events",
     )
+    suppress_near_weak_lightning: bool = Field(
+        default=False,
+        description="Drop nearby weak lightning events instead of recording them",
+    )
     buffer_max_size: int = 10000
 
     VALID_I2C_ADDRESSES: ClassVar[set[int]] = {0x01, 0x02, 0x03}

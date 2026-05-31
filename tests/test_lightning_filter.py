@@ -1,4 +1,4 @@
-"""Tests for lightning false-positive filtering."""
+"""Tests for near/weak lightning classification."""
 
 from lightning_collector.collector import _is_near_weak_lightning
 

@@ -58,6 +58,7 @@ def _log_configuration(settings: CollectorSettings) -> None:
     logger.info("  sensor_irq_pin: %d", settings.sensor_irq_pin)
     logger.info("  near_lightning_distance_km: %d", settings.near_lightning_distance_km)
     logger.info("  near_lightning_min_energy: %.3f", settings.near_lightning_min_energy)
+    logger.info("  suppress_near_weak_lightning: %s", settings.suppress_near_weak_lightning)
     logger.info("  buffer_max_size: %d", settings.buffer_max_size)
 
 
@@ -211,15 +212,16 @@ class LightningCollector:
                 self._settings.near_lightning_distance_km,
                 self._settings.near_lightning_min_energy,
             ):
-                logger.debug(
-                    "Filtered near/weak lightning event: distance=%s km, energy=%s "
+                logger.info(
+                    "Suspect near/weak lightning event: distance=%s km, energy=%s "
                     "(threshold: <=%d km requires >=%.3f)",
                     distance_km,
                     energy_normalized,
                     self._settings.near_lightning_distance_km,
                     self._settings.near_lightning_min_energy,
                 )
-                return
+                if self._settings.suppress_near_weak_lightning:
+                    return
 
         record = EventRecord(
             timestamp=timestamp,
@@ -320,10 +322,12 @@ class LightningCollector:
             # Configure for outdoor operation
             self._sensor.set_outdoors()
             self._sensor.set_tuning_caps(96)  # Antenna tuning for 500 kHz resonance
-            self._sensor.set_noise_floor_level(6)  # Increased - blocks more ambient RF noise
-            self._sensor.set_watchdog_threshold(8)  # Increased - stricter validation
-            self._sensor.set_spike_rejection(8)  # Increased - more robust disturber filtering
-            self._sensor.set_min_strikes(9)  # Requires 9 strikes in 15min window
+            self._sensor.set_noise_floor_level(2)
+            self._sensor.set_watchdog_threshold(2)
+            self._sensor.set_spike_rejection(2)
+            self._sensor.set_min_strikes(1)
+            self._sensor.enable_disturber()
+            self._sensor.set_irq_output_source(0)
             self._sensor_connected = True
             logger.info(
                 "Sensor connected and configured (I2C address=%#04x, bus=%d, IRQ pin=%d)",
@@ -355,10 +359,12 @@ class LightningCollector:
             # Configure for outdoor operation
             self._sensor.set_outdoors()
             self._sensor.set_tuning_caps(96)  # Antenna tuning for 500 kHz resonance
-            self._sensor.set_noise_floor_level(6)  # Increased - blocks more ambient RF noise
-            self._sensor.set_watchdog_threshold(8)  # Increased - stricter validation
-            self._sensor.set_spike_rejection(8)  # Increased - more robust disturber filtering
-            self._sensor.set_min_strikes(9)  # Requires 9 strikes in 15min window
+            self._sensor.set_noise_floor_level(2)
+            self._sensor.set_watchdog_threshold(2)
+            self._sensor.set_spike_rejection(2)
+            self._sensor.set_min_strikes(1)
+            self._sensor.enable_disturber()
+            self._sensor.set_irq_output_source(0)
             self._sensor.register_interrupt_callback(self._on_interrupt)
             self._sensor_connected = True
             logger.info("Sensor reconnected and reconfigured successfully")

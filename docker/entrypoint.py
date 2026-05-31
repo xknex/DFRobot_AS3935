@@ -55,6 +55,7 @@ OPTIONAL_COLLECTOR_VARS = {
     "LIGHTNING_SENSOR_IRQ_PIN": ("BCM GPIO pin for IRQ", "4"),
     "LIGHTNING_NEAR_LIGHTNING_DISTANCE_KM": ("Nearby weak-strike filter distance", "5"),
     "LIGHTNING_NEAR_LIGHTNING_MIN_ENERGY": ("Minimum energy for nearby strikes", "0.25"),
+    "LIGHTNING_SUPPRESS_NEAR_WEAK_LIGHTNING": ("Drop nearby weak-strike events", "false"),
     "LIGHTNING_BUFFER_MAX_SIZE": ("Max write buffer size", "10000"),
 }
 

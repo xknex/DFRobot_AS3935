@@ -62,18 +62,18 @@ def main() -> None:
     I2C_BUS = 1
     NEAR_LIGHTNING_DISTANCE_KM = 5
     NEAR_LIGHTNING_MIN_ENERGY = 0.25
-    SHOW_FILTERED_EVENTS = False
 
     try:
         with DFRobot_AS3935(address=I2C_ADDRESS, bus=I2C_BUS, irq_pin=IRQ_PIN) as sensor:
             # Configure sensor for outdoor use
             sensor.set_outdoors()
             sensor.set_tuning_caps(96)
-            sensor.set_noise_floor_level(6)
-            sensor.set_watchdog_threshold(8)
-            sensor.set_spike_rejection(8)
-            sensor.set_min_strikes(9)
-            sensor.disable_disturber()
+            sensor.set_noise_floor_level(2)
+            sensor.set_watchdog_threshold(2)
+            sensor.set_spike_rejection(2)
+            sensor.set_min_strikes(1)
+            sensor.enable_disturber()
+            sensor.set_irq_output_source(0)
 
             def interrupt_handler() -> None:
                 """Handle interrupt events from the AS3935 sensor."""
@@ -86,13 +86,12 @@ def main() -> None:
                         distance <= NEAR_LIGHTNING_DISTANCE_KM
                         and energy < NEAR_LIGHTNING_MIN_ENERGY
                     ):
-                        if SHOW_FILTERED_EVENTS:
-                            log_event(
-                                "FILTERED",
-                                f"Distance: {distance} km, Energy: {energy:.4f} "
-                                "(near/weak false-positive filter)",
-                                color="disturber",
-                            )
+                        log_event(
+                            "SUSPECT",
+                            f"Chip lightning: Distance: {distance} km, "
+                            f"Energy: {energy:.4f} (near/weak signature)",
+                            color="disturber",
+                        )
                         return
 
                     log_event(
@@ -117,10 +116,11 @@ def main() -> None:
             log_event("INFO", f"IRQ pin: BCM {IRQ_PIN} (physical pin 7)")
             log_event(
                 "INFO",
-                "Outdoor profile: tuning=96pF, noise=6, watchdog=8, "
-                "spike=8, min_strikes=9, disturber_irq=masked, "
-                f"near_filter<= {NEAR_LIGHTNING_DISTANCE_KM}km "
-                f"requires energy>={NEAR_LIGHTNING_MIN_ENERGY:.2f}",
+                "Outdoor diagnostic profile: tuning=96pF, noise=2, watchdog=2, "
+                "spike=2, min_strikes=1, disturber_irq=enabled, "
+                "irq_output=events, "
+                f"suspect<= {NEAR_LIGHTNING_DISTANCE_KM}km "
+                f"when energy<{NEAR_LIGHTNING_MIN_ENERGY:.2f}",
             )
             log_event("INFO", "Waiting for lightning events... (Ctrl+C to exit)")
 
