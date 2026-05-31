@@ -53,6 +53,8 @@ OPTIONAL_COLLECTOR_VARS = {
     "LIGHTNING_SENSOR_I2C_ADDRESS": ("I2C address (1, 2, or 3 = 0x01, 0x02, 0x03)", "3"),
     "LIGHTNING_SENSOR_I2C_BUS": ("I2C bus number", "1"),
     "LIGHTNING_SENSOR_IRQ_PIN": ("BCM GPIO pin for IRQ", "4"),
+    "LIGHTNING_NEAR_LIGHTNING_DISTANCE_KM": ("Nearby weak-strike filter distance", "5"),
+    "LIGHTNING_NEAR_LIGHTNING_MIN_ENERGY": ("Minimum energy for nearby strikes", "0.25"),
     "LIGHTNING_BUFFER_MAX_SIZE": ("Max write buffer size", "10000"),
 }
 

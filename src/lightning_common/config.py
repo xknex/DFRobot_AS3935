@@ -31,6 +31,18 @@ class CollectorSettings(BaseSettings):
     )
     sensor_i2c_bus: int = 1
     sensor_irq_pin: int = 4
+    near_lightning_distance_km: int = Field(
+        default=5,
+        ge=0,
+        le=63,
+        description="Distances at or below this value require higher energy",
+    )
+    near_lightning_min_energy: float = Field(
+        default=0.25,
+        ge=0.0,
+        le=1.0,
+        description="Minimum normalized energy for nearby lightning events",
+    )
     buffer_max_size: int = 10000
 
     VALID_I2C_ADDRESSES: ClassVar[set[int]] = {0x01, 0x02, 0x03}

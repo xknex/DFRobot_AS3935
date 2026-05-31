@@ -56,6 +56,8 @@ def _log_configuration(settings: CollectorSettings) -> None:
     logger.info("  sensor_i2c_address: %#04x", settings.sensor_i2c_address)
     logger.info("  sensor_i2c_bus: %d", settings.sensor_i2c_bus)
     logger.info("  sensor_irq_pin: %d", settings.sensor_irq_pin)
+    logger.info("  near_lightning_distance_km: %d", settings.near_lightning_distance_km)
+    logger.info("  near_lightning_min_energy: %.3f", settings.near_lightning_min_energy)
     logger.info("  buffer_max_size: %d", settings.buffer_max_size)
 
 
@@ -71,6 +73,18 @@ def _map_interrupt_source(source: int) -> EventType | None:
     elif source == _INT_NOISE:
         return EventType.NOISE
     return None
+
+
+def _is_near_weak_lightning(
+    distance_km: int | None,
+    energy_normalized: float | None,
+    near_distance_km: int,
+    near_min_energy: float,
+) -> bool:
+    """Return True when a lightning interrupt matches the local-noise pattern."""
+    if distance_km is None or energy_normalized is None:
+        return False
+    return distance_km <= near_distance_km and energy_normalized < near_min_energy
 
 
 class LightningCollector:
@@ -190,6 +204,22 @@ class LightningCollector:
                 logger.error("Failed to read lightning data: %s", exc)
                 # Still record the event with None values
                 pass
+
+            if _is_near_weak_lightning(
+                distance_km,
+                energy_normalized,
+                self._settings.near_lightning_distance_km,
+                self._settings.near_lightning_min_energy,
+            ):
+                logger.debug(
+                    "Filtered near/weak lightning event: distance=%s km, energy=%s "
+                    "(threshold: <=%d km requires >=%.3f)",
+                    distance_km,
+                    energy_normalized,
+                    self._settings.near_lightning_distance_km,
+                    self._settings.near_lightning_min_energy,
+                )
+                return
 
         record = EventRecord(
             timestamp=timestamp,

@@ -327,6 +327,8 @@ Configuration is loaded from environment variables (prefix `LIGHTNING_`) with an
 | `LIGHTNING_SENSOR_I2C_ADDRESS` | I2C address (0x01, 0x02, 0x03) | `0x03` | No |
 | `LIGHTNING_SENSOR_I2C_BUS` | I2C bus number | `1` | No |
 | `LIGHTNING_SENSOR_IRQ_PIN` | BCM GPIO pin for IRQ | `4` | No |
+| `LIGHTNING_NEAR_LIGHTNING_DISTANCE_KM` | Close-range false-positive filter distance | `5` | No |
+| `LIGHTNING_NEAR_LIGHTNING_MIN_ENERGY` | Minimum normalized energy for close-range events | `0.25` | No |
 | `LIGHTNING_BUFFER_MAX_SIZE` | Max write buffer size | `10000` | No |
 | `LIGHTNING_API_HOST` | REST API bind address | `0.0.0.0` | No |
 | `LIGHTNING_API_PORT` | REST API port (1–65535) | `8000` | No |
@@ -349,6 +351,8 @@ csv_file_path = "/var/lib/lightning/events.csv"
 sensor_i2c_address = 3
 sensor_i2c_bus = 1
 sensor_irq_pin = 4
+near_lightning_distance_km = 5
+near_lightning_min_energy = 0.25
 buffer_max_size = 10000
 
 # API settings
