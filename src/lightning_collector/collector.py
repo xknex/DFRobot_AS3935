@@ -287,9 +287,15 @@ class LightningCollector:
                 bus=self._settings.sensor_i2c_bus,
                 irq_pin=self._settings.sensor_irq_pin,
             )
+            # Configure for outdoor operation
+            self._sensor.set_outdoors()
+            self._sensor.set_tuning_caps(96)  # Antenna tuning for 500 kHz resonance
+            self._sensor.set_noise_floor_level(3)  # Reduce noise false positives
+            self._sensor.set_watchdog_threshold(2)
+            self._sensor.set_spike_rejection(2)
             self._sensor_connected = True
             logger.info(
-                "Sensor connected (I2C address=%#04x, bus=%d, IRQ pin=%d)",
+                "Sensor connected and configured (I2C address=%#04x, bus=%d, IRQ pin=%d)",
                 self._settings.sensor_i2c_address,
                 self._settings.sensor_i2c_bus,
                 self._settings.sensor_irq_pin,
@@ -315,9 +321,15 @@ class LightningCollector:
                 bus=self._settings.sensor_i2c_bus,
                 irq_pin=self._settings.sensor_irq_pin,
             )
+            # Configure for outdoor operation
+            self._sensor.set_outdoors()
+            self._sensor.set_tuning_caps(96)  # Antenna tuning for 500 kHz resonance
+            self._sensor.set_noise_floor_level(3)  # Reduce noise false positives
+            self._sensor.set_watchdog_threshold(2)
+            self._sensor.set_spike_rejection(2)
             self._sensor.register_interrupt_callback(self._on_interrupt)
             self._sensor_connected = True
-            logger.info("Sensor reconnected successfully")
+            logger.info("Sensor reconnected and reconfigured successfully")
         except (OSError, RuntimeError) as exc:
             logger.warning("Sensor reconnection failed: %s", exc)
             self._sensor = None

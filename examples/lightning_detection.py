@@ -38,9 +38,10 @@ def main() -> None:
 
     try:
         with DFRobot_AS3935(address=I2C_ADDRESS, bus=I2C_BUS, irq_pin=IRQ_PIN) as sensor:
-            # Configure sensor for indoor use
-            sensor.set_indoors()
-            sensor.set_noise_floor_level(2)
+            # Configure sensor for outdoor use
+            sensor.set_outdoors()
+            sensor.set_tuning_caps(96)
+            sensor.set_noise_floor_level(3)      # try 4 or 5 if "Noise level too high" continues
             sensor.set_watchdog_threshold(2)
             sensor.set_spike_rejection(2)
             sensor.set_min_strikes(1)
