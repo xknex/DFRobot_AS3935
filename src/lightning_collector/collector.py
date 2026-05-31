@@ -290,9 +290,10 @@ class LightningCollector:
             # Configure for outdoor operation
             self._sensor.set_outdoors()
             self._sensor.set_tuning_caps(96)  # Antenna tuning for 500 kHz resonance
-            self._sensor.set_noise_floor_level(3)  # Reduce noise false positives
-            self._sensor.set_watchdog_threshold(2)
-            self._sensor.set_spike_rejection(2)
+            self._sensor.set_noise_floor_level(6)  # Increased - blocks more ambient RF noise
+            self._sensor.set_watchdog_threshold(8)  # Increased - stricter validation
+            self._sensor.set_spike_rejection(8)  # Increased - more robust disturber filtering
+            self._sensor.set_min_strikes(9)  # Requires 9 strikes in 15min window
             self._sensor_connected = True
             logger.info(
                 "Sensor connected and configured (I2C address=%#04x, bus=%d, IRQ pin=%d)",
@@ -324,9 +325,10 @@ class LightningCollector:
             # Configure for outdoor operation
             self._sensor.set_outdoors()
             self._sensor.set_tuning_caps(96)  # Antenna tuning for 500 kHz resonance
-            self._sensor.set_noise_floor_level(3)  # Reduce noise false positives
-            self._sensor.set_watchdog_threshold(2)
-            self._sensor.set_spike_rejection(2)
+            self._sensor.set_noise_floor_level(6)  # Increased - blocks more ambient RF noise
+            self._sensor.set_watchdog_threshold(8)  # Increased - stricter validation
+            self._sensor.set_spike_rejection(8)  # Increased - more robust disturber filtering
+            self._sensor.set_min_strikes(9)  # Requires 9 strikes in 15min window
             self._sensor.register_interrupt_callback(self._on_interrupt)
             self._sensor_connected = True
             logger.info("Sensor reconnected and reconfigured successfully")

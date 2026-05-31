@@ -66,10 +66,10 @@ def main() -> None:
             # Configure sensor for outdoor use
             sensor.set_outdoors()
             sensor.set_tuning_caps(96)
-            sensor.set_noise_floor_level(3)
-            sensor.set_watchdog_threshold(4)
-            sensor.set_spike_rejection(4)
-            sensor.set_min_strikes(5)
+            sensor.set_noise_floor_level(6)     # Increased from 3 - blocks more ambient RF noise
+            sensor.set_watchdog_threshold(8)    # Increased from 4 - stricter validation
+            sensor.set_spike_rejection(8)       # Increased from 4 - more robust disturber filtering
+            sensor.set_min_strikes(9)           # Increased from 5 - requires 9 strikes in 15min window
             sensor.disable_disturber()
 
             def interrupt_handler() -> None:
