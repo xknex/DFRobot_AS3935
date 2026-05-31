@@ -20,6 +20,7 @@ Pin mapping reference:
 
 import signal
 import sys
+from datetime import datetime
 
 from dfrobot_as3935 import (
     DFRobot_AS3935,
@@ -27,6 +28,30 @@ from dfrobot_as3935 import (
     INT_LIGHTNING,
     INT_NOISE,
 )
+
+
+COLORS = {
+    "reset": "\033[0m",
+    "dim": "\033[2m",
+    "info": "\033[36m",
+    "lightning": "\033[32m",
+    "disturber": "\033[33m",
+    "noise": "\033[31m",
+    "error": "\033[31m",
+}
+
+
+def log_event(level: str, message: str, *, color: str = "info") -> None:
+    """Print a timestamped event line with ANSI color when supported."""
+    timestamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
+    if sys.stdout.isatty():
+        print(
+            f"{COLORS['dim']}{timestamp}{COLORS['reset']} "
+            f"{COLORS[color]}{level:<9}{COLORS['reset']} {message}",
+            flush=True,
+        )
+    else:
+        print(f"{timestamp} {level:<9} {message}", flush=True)
 
 
 def main() -> None:
@@ -41,10 +66,10 @@ def main() -> None:
             # Configure sensor for outdoor use
             sensor.set_outdoors()
             sensor.set_tuning_caps(96)
-            sensor.set_noise_floor_level(3)      # try 4 or 5 if "Noise level too high" continues
-            sensor.set_watchdog_threshold(2)
-            sensor.set_spike_rejection(2)
-            sensor.set_min_strikes(1)
+            sensor.set_noise_floor_level(3)
+            sensor.set_watchdog_threshold(4)
+            sensor.set_spike_rejection(4)
+            sensor.set_min_strikes(5)
 
             def interrupt_handler() -> None:
                 """Handle interrupt events from the AS3935 sensor."""
@@ -53,34 +78,43 @@ def main() -> None:
                 if source == INT_LIGHTNING:
                     distance = sensor.get_lightning_distance_km()
                     energy = sensor.get_strike_energy_normalized()
-                    print(
-                        f"Lightning detected! "
+                    log_event(
+                        "LIGHTNING",
                         f"Distance: {distance} km, "
-                        f"Energy: {energy:.4f}"
+                        f"Energy: {energy:.4f}",
+                        color="lightning",
                     )
                 elif source == INT_DISTURBER:
-                    print("Disturber detected (not lightning)")
+                    log_event(
+                        "DISTURBER",
+                        "Disturber detected (not lightning)",
+                        color="disturber",
+                    )
                 elif source == INT_NOISE:
-                    print("Noise level too high")
+                    log_event("NOISE", "Noise level too high", color="noise")
 
             sensor.register_interrupt_callback(interrupt_handler)
 
-            print("AS3935 Lightning Sensor ready.")
-            print(f"  I2C address: 0x{I2C_ADDRESS:02X}, bus: {I2C_BUS}")
-            print(f"  IRQ pin: BCM {IRQ_PIN} (physical pin 7)")
-            print("Waiting for lightning events... (Ctrl+C to exit)")
+            log_event("INFO", "AS3935 Lightning Sensor ready.")
+            log_event("INFO", f"I2C address: 0x{I2C_ADDRESS:02X}, bus: {I2C_BUS}")
+            log_event("INFO", f"IRQ pin: BCM {IRQ_PIN} (physical pin 7)")
+            log_event(
+                "INFO",
+                "Outdoor profile: tuning=96pF, noise=3, watchdog=4, spike=4, min_strikes=5",
+            )
+            log_event("INFO", "Waiting for lightning events... (Ctrl+C to exit)")
 
             # Keep the script running until interrupted
             signal.pause()
 
     except ConnectionError as e:
-        print(f"Sensor connection failed: {e}", file=sys.stderr)
+        log_event("ERROR", f"Sensor connection failed: {e}", color="error")
         sys.exit(1)
     except OSError as e:
-        print(f"I2C communication error: {e}", file=sys.stderr)
+        log_event("ERROR", f"I2C communication error: {e}", color="error")
         sys.exit(1)
     except KeyboardInterrupt:
-        print("\nShutting down.")
+        log_event("INFO", "Shutting down.")
 
 
 if __name__ == "__main__":
