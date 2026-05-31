@@ -70,6 +70,7 @@ def main() -> None:
             sensor.set_watchdog_threshold(4)
             sensor.set_spike_rejection(4)
             sensor.set_min_strikes(5)
+            sensor.disable_disturber()
 
             def interrupt_handler() -> None:
                 """Handle interrupt events from the AS3935 sensor."""
@@ -100,7 +101,8 @@ def main() -> None:
             log_event("INFO", f"IRQ pin: BCM {IRQ_PIN} (physical pin 7)")
             log_event(
                 "INFO",
-                "Outdoor profile: tuning=96pF, noise=3, watchdog=4, spike=4, min_strikes=5",
+                "Outdoor profile: tuning=96pF, noise=3, watchdog=4, "
+                "spike=4, min_strikes=5, disturber_irq=masked",
             )
             log_event("INFO", "Waiting for lightning events... (Ctrl+C to exit)")
 
