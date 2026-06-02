@@ -92,75 +92,43 @@ def log_event(level: str, message: str, *, color: str = "info") -> None:
         print(f"{timestamp} {level:<9} {message}", flush=True)
 
 
-def print_dashboard_header() -> None:
-    """Print a beautiful dashboard header."""
-    if not sys.stdout.isatty():
-        return
-
-    print()
-    print(f"{_color('bold')}{_color('status_bg')}{_color('status_text')}")
-    print("╔══════════════════════════════════════════════════════════════════════════════╗")
-    print("║                    ⚡ LIGHTNING DETECTION DASHBOARD ⚡                       ║")
-    print("╚══════════════════════════════════════════════════════════════════════════════╝")
-    print(f"{_color('reset')}")
-    print()
-
-
-def print_status_line(
+def print_lightning_event(
     *,
-    lightning_count: int,
+    distance: int,
+    energy: float,
+    distance_is_unconverged: bool,
+    events_since_last: int,
     disturber_count: int,
     noise_count: int,
-    last_lightning: str | None = None,
-    storm_intensity: float = 0.0,
 ) -> None:
-    """Print a status line with storm statistics and visual indicators."""
+    """Print a beautiful lightning event with counts of events in between."""
     if not sys.stdout.isatty():
+        # Plain text output for non-TTY environments
+        timestamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
+        print(
+            f"{timestamp} LIGHTNING | Distance: {distance} km "
+            f"{'(unconverged)' if distance_is_unconverged else ''}, "
+            f"Energy: {energy:.4f} | "
+            f"Events since last: {events_since_last} "
+            f"(Disturb: {disturber_count}, Noise: {noise_count})"
+        )
         return
 
-    # Calculate storm intensity (0-100%)
-    intensity = int(min(storm_intensity * 100, 100))
+    # Colorful output for TTY
+    timestamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
+    event_type = "(unconverged)" if distance_is_unconverged else ""
 
-    # Build intensity bar
-    bar_length = 40
-    filled = int(bar_length * intensity / 100)
-    empty = bar_length - filled
-    bar = (
-        f"{_color('lightning_glow')}{_symbol('bar_full') * filled}"
-        f"{_color('dim')}{_symbol('bar_full') * empty}{_color('reset')}"
-    )
-
-    # Get current timestamp
-    timestamp = datetime.now().astimezone().strftime("%H:%M:%S")
-
-    # Build status line
-    line = (
-        f"{_color('dim')}[{timestamp}]{_color('reset')} "
-        f"{_color('lightning')}{_symbol('bolt')} Light: {lightning_count:>5}  "
-        f"{_color('disturber')}{_symbol('warning')} Dist: {disturber_count:>5}  "
-        f"{_color('noise')}{_symbol('circle_filled')} Noise: {noise_count:>5}  "
-        f"Intensity: {bar} {intensity}%"
-    )
-
-    # Print, overwriting previous line if possible
-    print(f"\r{line}", end="", flush=True)
-
-    # Print last lightning info on separate line
-    if last_lightning:
-        print()
-        print(f"  {_color('lightning')}{_symbol('bolt')} {_color('lightning_glow')}{last_lightning}{_color('reset')}")
-        print(f"\r{line}", end="", flush=True)
-
-
-def clear_status_line() -> None:
-    """Clear the status line for fresh output."""
-    if sys.stdout.isatty():
-        print("\r" + " " * 120, end="\r", flush=True)
-
-
-# ============================================================================
-# Main Application
-# ============================================================================
+    print()
+    print(f"  {_color('lightning_glow')}{_symbol('bolt')}{_color('reset')}" * 20)
+    print(f"{_color('lightning_glow')}  {_symbol('cloud_lightning')}  LIGHTNING STRIKE DETECTED!  {_symbol('cloud_lightning')}{_color('reset')}")
+    print(f"  {_color('lightning_glow')}{_symbol('bolt')}{_color('reset')}" * 20)
+    print(f"{_color('dim')}{timestamp}{_color('reset')}")
+    print(f"  Distance: {distance} km {event_type}")
+    print(f"  Energy:   {energy:.4f}")
+    print(f"  Events since last: {events_since_last}")
+    print(f"    {_color('disturber')}{_symbol('warning')} Disturb: {disturber_count}{_color('reset')}")
+    print(f"    {_color('noise')}{_symbol('circle_filled')} Noise: {noise_count}{_color('reset')}")
+    print(f"  {_color('lightning_glow')}{_symbol('bolt')}{_color('reset')}" * 20)
 
 
 def main() -> None:
@@ -178,12 +146,10 @@ def main() -> None:
     disturber_count = 0
     noise_count = 0
     events_since_last_lightning = 0
-    last_lightning_info: str | None = None
+    total_disturbers_since_last = 0
+    total_noise_since_last = 0
 
     try:
-        # Print dashboard header
-        print_dashboard_header()
-
         with DFRobot_AS3935(address=I2C_ADDRESS, bus=I2C_BUS, irq_pin=IRQ_PIN) as sensor:
             # Configure sensor for outdoor use with sensitive settings
             sensor.set_outdoors()
@@ -198,7 +164,8 @@ def main() -> None:
             def interrupt_handler() -> None:
                 """Handle interrupt events from the AS3935 sensor."""
                 nonlocal lightning_count, disturber_count, noise_count
-                nonlocal events_since_last_lightning, last_lightning_info
+                nonlocal events_since_last_lightning
+                nonlocal total_disturbers_since_last, total_noise_since_last
 
                 source = sensor.get_interrupt_source()
 
@@ -214,69 +181,32 @@ def main() -> None:
                         events_since_last_lightning += 1
                         return
 
-                    events_since_last_lightning = 0
-                    lightning_count += 1
-
-                    # Build lightning info string
-                    if distance == 1:
-                        info = (
-                            f"Distance: {distance} km (unconverged), "
-                            f"Energy: {energy:.4f}"
-                        )
-                    else:
-                        info = f"Distance: {distance} km, Energy: {energy:.4f}"
-
-                    last_lightning_info = info
-
-                    # Print lightning event with visual flair
-                    timestamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
-                    print()
-                    print(f"{_color('reset')}")
-                    print(f"{_color('bold')}{_color('lightning_glow')}{'=' * 70}{_color('reset')}")
-                    print(f"{_color('bold')}{_color('lightning_glow')}  {_symbol('bolt')} {_symbol('cloud_lightning')}  LIGHTNING STRIKE DETECTED!  {_symbol('cloud_lightning')} {_symbol('bolt')}{_color('reset')}")
-                    print(f"{_color('bold')}{_color('lightning_glow')}{'=' * 70}{_color('reset')}")
-                    print(f"{_color('dim')}{timestamp}{_color('reset')}")
-                    print(f"  Distance: {distance} km" + (" (unconverged)" if distance == 1 else ""))
-                    print(f"  Energy:   {energy:.4f}")
-                    print(f"{_color('reset')}")
-
-                    # Update status line
-                    storm_intensity = (lightning_count + disturber_count + noise_count) / 100
-                    print_status_line(
-                        lightning_count=lightning_count,
-                        disturber_count=disturber_count,
-                        noise_count=noise_count,
-                        last_lightning=info,
-                        storm_intensity=storm_intensity,
+                    # Print the lightning event with counts of events since last
+                    distance_is_unconverged = distance == 1
+                    print_lightning_event(
+                        distance=distance,
+                        energy=energy,
+                        distance_is_unconverged=distance_is_unconverged,
+                        events_since_last=events_since_last_lightning,
+                        disturber_count=total_disturbers_since_last,
+                        noise_count=total_noise_since_last,
                     )
+
+                    # Reset counters
+                    events_since_last_lightning = 0
+                    total_disturbers_since_last = 0
+                    total_noise_since_last = 0
+                    lightning_count += 1
 
                 elif source == INT_DISTURBER:
                     events_since_last_lightning += 1
+                    total_disturbers_since_last += 1
                     disturber_count += 1
-
-                    # Update status line
-                    storm_intensity = (lightning_count + disturber_count + noise_count) / 100
-                    print_status_line(
-                        lightning_count=lightning_count,
-                        disturber_count=disturber_count,
-                        noise_count=noise_count,
-                        last_lightning=last_lightning_info,
-                        storm_intensity=storm_intensity,
-                    )
 
                 elif source == INT_NOISE:
                     events_since_last_lightning += 1
+                    total_noise_since_last += 1
                     noise_count += 1
-
-                    # Update status line
-                    storm_intensity = (lightning_count + disturber_count + noise_count) / 100
-                    print_status_line(
-                        lightning_count=lightning_count,
-                        disturber_count=disturber_count,
-                        noise_count=noise_count,
-                        last_lightning=last_lightning_info,
-                        storm_intensity=storm_intensity,
-                    )
 
             sensor.register_interrupt_callback(interrupt_handler)
 
@@ -293,31 +223,15 @@ def main() -> None:
                 f"when energy<{NEAR_LIGHTNING_MIN_ENERGY:.2f}",
             )
             log_event("INFO", "Waiting for lightning events... (Ctrl+C to exit)")
-            print()
-
-            # Print initial status line
-            print_status_line(
-                lightning_count=lightning_count,
-                disturber_count=disturber_count,
-                noise_count=noise_count,
-                storm_intensity=0.0,
-            )
 
             # Keep the script running until interrupted
             signal.pause()
 
     except ConnectionError as e:
-        clear_status_line()
         log_event("ERROR", f"Sensor connection failed: {e}", color="error")
         sys.exit(1)
     except OSError as e:
-        clear_status_line()
         log_event("ERROR", f"I2C communication error: {e}", color="error")
         sys.exit(1)
     except KeyboardInterrupt:
-        clear_status_line()
         log_event("INFO", "Shutting down.")
-
-
-if __name__ == "__main__":
-    main()
