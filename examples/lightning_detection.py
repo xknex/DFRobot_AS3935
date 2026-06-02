@@ -71,7 +71,7 @@ def main() -> None:
             sensor.set_noise_floor_level(2)
             sensor.set_watchdog_threshold(2)
             sensor.set_spike_rejection(2)
-            sensor.set_min_strikes(1)
+            sensor.set_min_strikes(5)
             sensor.enable_disturber()
             sensor.set_irq_output_source(0)
 
@@ -82,6 +82,18 @@ def main() -> None:
                 if source == INT_LIGHTNING:
                     distance = sensor.get_lightning_distance_km()
                     energy = sensor.get_strike_energy_normalized()
+
+                    # Unconverged distance bypass: distance == 1 is the AS3935's
+                    # default when the algorithm hasn't converged — skip filter
+                    if distance == 1:
+                        log_event(
+                            "LIGHTNING",
+                            f"Distance: {distance} km (unconverged), "
+                            f"Energy: {energy:.4f}",
+                            color="lightning",
+                        )
+                        return
+
                     if (
                         distance <= NEAR_LIGHTNING_DISTANCE_KM
                         and energy < NEAR_LIGHTNING_MIN_ENERGY
@@ -117,7 +129,7 @@ def main() -> None:
             log_event(
                 "INFO",
                 "Outdoor diagnostic profile: tuning=96pF, noise=2, watchdog=2, "
-                "spike=2, min_strikes=1, disturber_irq=enabled, "
+                "spike=2, min_strikes=5, disturber_irq=enabled, "
                 "irq_output=events, "
                 f"suspect<= {NEAR_LIGHTNING_DISTANCE_KM}km "
                 f"when energy<{NEAR_LIGHTNING_MIN_ENERGY:.2f}",

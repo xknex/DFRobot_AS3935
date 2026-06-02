@@ -85,6 +85,8 @@ def _is_near_weak_lightning(
     """Return True when a lightning interrupt matches the local-noise pattern."""
     if distance_km is None or energy_normalized is None:
         return False
+    if distance_km == 1:
+        return False  # Unconverged distance — bypass filter
     return distance_km <= near_distance_km and energy_normalized < near_min_energy
 
 
@@ -325,7 +327,7 @@ class LightningCollector:
             self._sensor.set_noise_floor_level(2)
             self._sensor.set_watchdog_threshold(2)
             self._sensor.set_spike_rejection(2)
-            self._sensor.set_min_strikes(1)
+            self._sensor.set_min_strikes(5)
             self._sensor.enable_disturber()
             self._sensor.set_irq_output_source(0)
             self._sensor_connected = True
@@ -362,7 +364,7 @@ class LightningCollector:
             self._sensor.set_noise_floor_level(2)
             self._sensor.set_watchdog_threshold(2)
             self._sensor.set_spike_rejection(2)
-            self._sensor.set_min_strikes(1)
+            self._sensor.set_min_strikes(5)
             self._sensor.enable_disturber()
             self._sensor.set_irq_output_source(0)
             self._sensor.register_interrupt_callback(self._on_interrupt)
