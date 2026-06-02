@@ -65,11 +65,12 @@ def main() -> None:
 
     try:
         with DFRobot_AS3935(address=I2C_ADDRESS, bus=I2C_BUS, irq_pin=IRQ_PIN) as sensor:
-            # Configure sensor for outdoor use
+            # Configure sensor for outdoor use with sensitive settings
+            # Lower noise floor and watchdog threshold to detect more real lightning
             sensor.set_outdoors()
             sensor.set_tuning_caps(96)
-            sensor.set_noise_floor_level(2)
-            sensor.set_watchdog_threshold(2)
+            sensor.set_noise_floor_level(1)  # Lower = more sensitive to weak signals
+            sensor.set_watchdog_threshold(1)  # Lower = less strict disturber filtering
             sensor.set_spike_rejection(2)
             sensor.set_min_strikes(5)
             sensor.enable_disturber()

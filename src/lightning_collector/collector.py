@@ -321,11 +321,12 @@ class LightningCollector:
                 bus=self._settings.sensor_i2c_bus,
                 irq_pin=self._settings.sensor_irq_pin,
             )
-            # Configure for outdoor operation
+            # Configure for outdoor operation with sensitive settings
+            # Lower noise floor and watchdog threshold to detect more real lightning
             self._sensor.set_outdoors()
             self._sensor.set_tuning_caps(96)  # Antenna tuning for 500 kHz resonance
-            self._sensor.set_noise_floor_level(2)
-            self._sensor.set_watchdog_threshold(2)
+            self._sensor.set_noise_floor_level(1)  # Lower = more sensitive to weak signals
+            self._sensor.set_watchdog_threshold(1)  # Lower = less strict disturber filtering
             self._sensor.set_spike_rejection(2)
             self._sensor.set_min_strikes(5)
             self._sensor.enable_disturber()
@@ -358,11 +359,12 @@ class LightningCollector:
                 bus=self._settings.sensor_i2c_bus,
                 irq_pin=self._settings.sensor_irq_pin,
             )
-            # Configure for outdoor operation
+            # Configure for outdoor operation with sensitive settings
+            # Lower noise floor and watchdog threshold to detect more real lightning
             self._sensor.set_outdoors()
             self._sensor.set_tuning_caps(96)  # Antenna tuning for 500 kHz resonance
-            self._sensor.set_noise_floor_level(2)
-            self._sensor.set_watchdog_threshold(2)
+            self._sensor.set_noise_floor_level(1)  # Lower = more sensitive to weak signals
+            self._sensor.set_watchdog_threshold(1)  # Lower = less strict disturber filtering
             self._sensor.set_spike_rejection(2)
             self._sensor.set_min_strikes(5)
             self._sensor.enable_disturber()
