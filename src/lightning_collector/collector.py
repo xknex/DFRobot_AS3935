@@ -81,12 +81,30 @@ def _is_near_weak_lightning(
     energy_normalized: float | None,
     near_distance_km: int,
     near_min_energy: float,
+    unconverged_min_energy: float = 0.30,
 ) -> bool:
-    """Return True when a lightning interrupt matches the local-noise pattern."""
+    """Return True when a lightning interrupt matches the local-noise pattern.
+
+    Args:
+        distance_km: Distance in km from AS3935 (None if unavailable)
+        energy_normalized: Normalized energy value (0.0-1.0)
+        near_distance_km: Maximum distance for "near" classification
+        near_min_energy: Minimum energy for "near" events to pass through
+        unconverged_min_energy: Minimum energy for distance=1 events to pass
+            (default 0.30 filters out low-energy noise during unconverged state)
+
+    Returns:
+        True if event should be classified as near/weak and potentially filtered
+    """
     if distance_km is None or energy_normalized is None:
         return False
     if distance_km == 1:
-        return False  # Unconverged distance — bypass filter
+        # Unconverged distance - bypass filter if energy is too low
+        # (distance=1 means the chip's algorithm hasn't converged yet)
+        if energy_normalized < unconverged_min_energy:
+            return False  # Bypass filter - not near/weak
+        # Energy is high enough, apply the near/weak filter normally
+        return distance_km <= near_distance_km and energy_normalized < near_min_energy
     return distance_km <= near_distance_km and energy_normalized < near_min_energy
 
 
@@ -213,6 +231,7 @@ class LightningCollector:
                 energy_normalized,
                 self._settings.near_lightning_distance_km,
                 self._settings.near_lightning_min_energy,
+                unconverged_min_energy=0.30,  # Filter low-energy noise for distance=1
             ):
                 logger.info(
                     "Suspect near/weak lightning event: distance=%s km, energy=%s "

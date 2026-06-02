@@ -13,7 +13,7 @@ from lightning_collector.collector import _is_near_weak_lightning
 
 
 @pytest.mark.property
-@given(energy=st.floats(min_value=0.0, max_value=0.2499, allow_nan=False, allow_infinity=False))
+@given(energy=st.floats(min_value=0.0, max_value=0.2999, allow_nan=False, allow_infinity=False))
 @settings(max_examples=200)
 def test_unconverged_distance_bypasses_filter(energy: float) -> None:
     """Unconverged distance (distance == 1) should bypass the near/weak filter.
@@ -24,9 +24,9 @@ def test_unconverged_distance_bypasses_filter(energy: float) -> None:
 
     **Validates: Requirements 2.1, 2.3**
     """
-    result = _is_near_weak_lightning(1, energy, 5, 0.25)
+    result = _is_near_weak_lightning(1, energy, 5, 0.25, unconverged_min_energy=0.30)
     assert result is False, (
-        f"_is_near_weak_lightning(1, {energy}, 5, 0.25) returned True — "
+        f"_is_near_weak_lightning(1, {energy}, 5, 0.25, unconverged_min_energy=0.30) returned True — "
         f"unconverged distance should bypass filter"
     )
 
@@ -141,12 +141,14 @@ def test_none_energy_preserved(distance: int) -> None:
 
 
 def test_filters_near_weak_lightning() -> None:
-    assert not _is_near_weak_lightning(1, 0.2144, 5, 0.25)  # distance=1 bypasses filter
+    assert not _is_near_weak_lightning(1, 0.2144, 5, 0.25, unconverged_min_energy=0.30)  # distance=1 with low energy bypasses filter
+    assert not _is_near_weak_lightning(1, 0.24, 5, 0.25, unconverged_min_energy=0.30)   # distance=1 with energy < 0.30 bypasses filter
     assert _is_near_weak_lightning(5, 0.0728, 5, 0.25)
 
 
 def test_allows_near_strong_lightning() -> None:
-    assert not _is_near_weak_lightning(1, 0.25, 5, 0.25)
+    assert not _is_near_weak_lightning(1, 0.25, 5, 0.25, unconverged_min_energy=0.30)  # distance=1 with energy < 0.30 bypasses filter
+    assert not _is_near_weak_lightning(1, 0.30, 5, 0.25, unconverged_min_energy=0.30)  # distance=1 with energy >= 0.30 is filtered
     assert not _is_near_weak_lightning(5, 0.8, 5, 0.25)
 
 
@@ -156,5 +158,5 @@ def test_allows_distant_weak_lightning() -> None:
 
 
 def test_allows_incomplete_lightning_data() -> None:
-    assert not _is_near_weak_lightning(None, 0.01, 5, 0.25)
-    assert not _is_near_weak_lightning(1, None, 5, 0.25)
+    assert not _is_near_weak_lightning(None, 0.01, 5, 0.25, unconverged_min_energy=0.30)
+    assert not _is_near_weak_lightning(1, None, 5, 0.25, unconverged_min_energy=0.30)

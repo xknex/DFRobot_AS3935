@@ -85,7 +85,14 @@ def main() -> None:
                     energy = sensor.get_strike_energy_normalized()
 
                     # Unconverged distance bypass: distance == 1 is the AS3935's
-                    # default when the algorithm hasn't converged — skip filter
+                    # default when the algorithm hasn't converged. Skip filter
+                    # only if energy is high enough to likely be real lightning.
+                    # Low-energy events (energy < 0.30) are filtered out to
+                    # prevent false detections from electrical noise during storms.
+                    UNCONVERGED_MIN_ENERGY = 0.30
+                    if distance == 1 and energy < UNCONVERGED_MIN_ENERGY:
+                        # Bypass filter - this is likely noise, not real lightning
+                        return
                     if distance == 1:
                         log_event(
                             "LIGHTNING",
