@@ -34,35 +34,13 @@ from dfrobot_as3935 import (
 # Visual Constants
 # ============================================================================
 
-# ANSI color codes
-COLORS = {
-    "reset": "\033[0m",
-    "bold": "\033[1m",
-    "dim": "\033[2m",
-    "underline": "\033[4m",
-    "info": "\033[36m",
-    "lightning": "\033[38;5;226m",  # Bright yellow
-    "lightning_glow": "\033[38;5;190m",  # Yellow with glow effect
-    "disturber": "\033[38;5;208m",  # Orange
-    "noise": "\033[38;5;196m",  # Red
-    "error": "\033[38;5;196m",
-    "status_bg": "\033[48;5;236m",  # Dark gray background
-    "status_text": "\033[38;5;255m",  # White
+UNICODE_SYMBOLS = {
+    "bolt": "\u26a1",
+    "cloud_lightning": "\u26c8",
+    "warning": "\u26a0",
+    "circle_filled": "\u25a0",
 }
 
-# Unicode symbols
-SYMBOLS = {
-    "bolt": "\u26a1",
-    "cloud": "\u2601",
-    "cloud_lightning": "\u26c8",
-    "warning": "\u26a0\ufe0f",
-    "circle": "\u25cf",
-    "circle_filled": "\u25a0",
-    "bar_full": "\u2588",
-    "bar_half": "\u2594",
-    "arrow_right": "\u2192",
-    "dash": "\u2014",
-}
 
 # ============================================================================
 # Visual Helpers
@@ -76,7 +54,7 @@ def _color(code: str) -> str:
 
 def _symbol(name: str) -> str:
     """Get Unicode symbol."""
-    return SYMBOLS.get(name, "?")
+    return UNICODE_SYMBOLS.get(name, "?")
 
 
 def log_event(level: str, message: str, *, color: str = "info") -> None:
@@ -101,34 +79,54 @@ def print_lightning_event(
     disturber_count: int,
     noise_count: int,
 ) -> None:
-    """Print a beautiful lightning event with counts of events in between."""
-    if not sys.stdout.isatty():
-        # Plain text output for non-TTY environments
-        timestamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
-        print(
-            f"{timestamp} LIGHTNING | Distance: {distance} km "
-            f"{'(unconverged)' if distance_is_unconverged else ''}, "
-            f"Energy: {energy:.4f} | "
-            f"Events since last: {events_since_last} "
-            f"(Disturb: {disturber_count}, Noise: {noise_count})"
-        )
-        return
-
-    # Colorful output for TTY
+    """Print a lightning event with counts of events in between."""
     timestamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
     event_type = "(unconverged)" if distance_is_unconverged else ""
 
-    print()
-    print(f"  {_color('lightning_glow')}{_symbol('bolt')}{_color('reset')}" * 20)
-    print(f"{_color('lightning_glow')}  {_symbol('cloud_lightning')}  LIGHTNING STRIKE DETECTED!  {_symbol('cloud_lightning')}{_color('reset')}")
-    print(f"  {_color('lightning_glow')}{_symbol('bolt')}{_color('reset')}" * 20)
-    print(f"{_color('dim')}{timestamp}{_color('reset')}")
-    print(f"  Distance: {distance} km {event_type}")
-    print(f"  Energy:   {energy:.4f}")
-    print(f"  Events since last: {events_since_last}")
-    print(f"    {_color('disturber')}{_symbol('warning')} Disturb: {disturber_count}{_color('reset')}")
-    print(f"    {_color('noise')}{_symbol('circle_filled')} Noise: {noise_count}{_color('reset')}")
-    print(f"  {_color('lightning_glow')}{_symbol('bolt')}{_color('reset')}" * 20)
+    if sys.stdout.isatty():
+        # Colorful TTY output
+        print()
+        print(f"{_color('lightning')}{_symbol('bolt')}{_color('reset')}" * 25)
+        print(f"{_color('lightning')}  {_symbol('cloud_lightning')}  LIGHTNING STRIKE!  {_symbol('cloud_lightning')}{_color('reset')}")
+        print(f"{_color('lightning')}{_symbol('bolt')}{_color('reset')}" * 25)
+        print(f"{_color('dim')}{timestamp}{_color('reset')}")
+        print(f"  Distance: {distance} km {event_type}")
+        print(f"  Energy:   {energy:.4f}")
+        print(f"  Events since last: {events_since_last}")
+        print(f"    {_color('disturber')}{_symbol('warning')} Disturb: {disturber_count}{_color('reset')}")
+        print(f"    {_color('noise')}{_symbol('circle_filled')} Noise: {noise_count}{_color('reset')}")
+        print(f"{_color('lightning')}{_symbol('bolt')}{_color('reset')}" * 25)
+    else:
+        # Plain text for non-TTY
+        print(
+            f"{timestamp} LIGHTNING | Distance: {distance} km {event_type}, "
+            f"Energy: {energy:.4f} | Events: {events_since_last} "
+            f"(Disturb: {disturber_count}, Noise: {noise_count})"
+        )
+
+
+COLORS = {
+    "reset": "\033[0m",
+    "dim": "\033[2m",
+    "info": "\033[36m",
+    "lightning": "\033[38;5;226m",  # Bright yellow
+    "disturber": "\033[38;5;208m",  # Orange
+    "noise": "\033[38;5;196m",  # Red
+    "error": "\033[38;5;196m",
+}
+
+
+def log_event(level: str, message: str, *, color: str = "info") -> None:
+    """Print a timestamped event line with ANSI color when supported."""
+    timestamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
+    if sys.stdout.isatty():
+        print(
+            f"{COLORS['dim']}{timestamp}{COLORS['reset']} "
+            f"{COLORS[color]}{level:<9}{COLORS['reset']} {message}",
+            flush=True,
+        )
+    else:
+        print(f"{timestamp} {level:<9} {message}", flush=True)
 
 
 def main() -> None:
@@ -141,7 +139,7 @@ def main() -> None:
     NEAR_LIGHTNING_MIN_ENERGY = 0.25
     UNCONVERGED_MIN_ENERGY = 0.30
 
-    # Counters for storm statistics
+    # Counters for event statistics
     lightning_count = 0
     disturber_count = 0
     noise_count = 0
@@ -151,7 +149,7 @@ def main() -> None:
 
     try:
         with DFRobot_AS3935(address=I2C_ADDRESS, bus=I2C_BUS, irq_pin=IRQ_PIN) as sensor:
-            # Configure sensor for outdoor use with sensitive settings
+            # Configure sensor for outdoor use
             sensor.set_outdoors()
             sensor.set_tuning_caps(96)
             sensor.set_noise_floor_level(1)  # Lower = more sensitive to weak signals
@@ -210,7 +208,6 @@ def main() -> None:
 
             sensor.register_interrupt_callback(interrupt_handler)
 
-            # Print startup info
             log_event("INFO", "AS3935 Lightning Sensor ready.")
             log_event("INFO", f"I2C address: 0x{I2C_ADDRESS:02X}, bus: {I2C_BUS}")
             log_event("INFO", f"IRQ pin: BCM {IRQ_PIN} (physical pin 7)")
@@ -235,3 +232,7 @@ def main() -> None:
         sys.exit(1)
     except KeyboardInterrupt:
         log_event("INFO", "Shutting down.")
+
+
+if __name__ == "__main__":
+    main()
